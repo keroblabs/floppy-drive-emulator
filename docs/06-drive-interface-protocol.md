@@ -37,6 +37,16 @@
    - [6.8 STM32 decoder model](#68-preliminary-stm32-command-decoder-model)
    - [6.9 Tests and open items](#69-tests-boundaries-and-open-verification)
 7. [Operation: seek, step, direction and recalibration](#7-operation-seek-step-direction-and-recalibration)
+   - [7.1 Signals and selection](#71-relevant-signals-register-addresses-and-responsibilities)
+   - [7.2 Track geometry](#72-track-geometry-and-virtual-position)
+   - [7.3 ROM seek algorithm](#73-the-macintosh-plus-seek-algorithm--one-step-per-command)
+   - [7.4 STEP acknowledgement](#74-step-acknowledgement-and-the-meaning-of-step)
+   - [7.5 Electrical versus mechanical timing](#75-timing-electrical-handshake-versus-physical-mechanism-limits)
+   - [7.6 READY, track zero, and power-on](#76-ready-tk0-disk-presence-and-power-on-initialization)
+   - [7.7 Recalibration](#77-the-macintosh-plus-recalibration-home-to-track-zero-procedure)
+   - [7.8 ROM polling and errors](#78-the-roms-post-seek-polling-and-error-behaviour)
+   - [7.9 STM32 state model](#79-preliminary-stm32-state-and-event-model)
+   - [7.10 Test matrix](#710-verification-matrix-and-remaining-questions)
 8. [Operation: motor, ready handshake and tachometer](#8-operation-motor-ready-handshake-and-tachometer)
 9. [Operation: disk insertion, protection and eject](#9-operation-disk-insertion-protection-and-eject)
 10. [Operation: serial GCR disk-data reading](#10-operation-serial-gcr-disk-data-reading)
@@ -458,7 +468,257 @@ At any time when /ENBL is LOW:
 
 ## 7. Operation: seek, step, direction and recalibration
 
-**TO DEVELOP.** ROM: `Sony_Seek`, `Sony_Recal`, `SONY_WAIT100`, `SONY_WAITREADY`. Define track range 0–79, direction, single-step triggering, /STEP feedback, recalibration to track zero, settle/ready sequencing, and track-boundary handling.
+**Status:** Core algorithm, command/status mapping, ROM use and original drive timing verified. Emulator edge-case policy and physical-hardware conformance remain open.
+
+**Design principle:** The STM32 maintains a **virtual track position**. There is no stepper motor and no mechanically realistic seek/settle delay. We nevertheless preserve the *interface contract*: one accepted step per valid command, appropriate `/STEP` feedback, `/TK0` at the zero boundary, and `/READY` only when the selected data stream can actually be served.
+
+### 7.1 Relevant signals, register addresses and responsibilities
+
+This operation is implemented entirely with the shared interface from Sections 3–6. No separate seek, track-zero or step connector pins exist.
+
+| Function | Physical line / RD selection | Project selector | ROM address / symbol | Behaviour |
+|---|---|---|---|---|
+| Write direction **inward** | LSTRB strobe; CA1=0, CA0=0, SEL=0, CA2=0 | `0x0` | `0 / DirLAdr` | Subsequent step goes to greater track numbers |
+| Write direction **outward** | LSTRB strobe; same latch, CA2=1 | `0x8` | `1 / DirHAdr` | Subsequent step goes toward track zero |
+| Request **one step** | LSTRB strobe; CA1=0, CA0=1, SEL=0, CA2=0 | `0x2` | `4 / StepLAdr` | Drive accepts a low-going `/STEP` event |
+| Read **step acknowledgement** | Selected on RD pin 16 (no strobe) | `0x2` | `4 / StepLAdr` | `1` = available for another step; `0` = still processing |
+| Read **track zero** | Selected on RD pin 16 (no strobe) | `0x5` | `10 / Tk0Adr` | `0` = at track zero |
+| Read **ready** | Selected on RD pin 16 (no strobe) | `0xD` | `11 / ReadyAdr` | `0` = data transfer permitted |
+| Select/enable drive | `/ENBL.INT` pin 14 | — | IWM internal-drive enable | Qualifies command/status communication |
+
+**[DOC]** `/DIRTN` is active low for inward movement; the original drive sets this latch to **0 on disable**. `/STEP` is active low and *automatically returns high after a request has been registered*. **[ROM]** The normal Plus code uses `StepLAdr` to request a step; it does not need a separate `StepHAdr` strobe to complete each one.
+
+### 7.2 Track geometry and virtual position
+
+**[DOC]** The 800K mechanism uses **80 concentric tracks per side**, numbered **0–79**, with **track 0 outermost** and greater track numbers closer to the centre. A double-sided disk has **two heads/sides but one common radial track position**. Changing head/side via the data selection does *not* itself cause a radial step.
+
+**[DECISION]** Model physical head position as one integer `track` independent of mounted-media contents and current side. A normal step updates exactly one track in the current direction:
+
+~~~text
+direction = INWARD  (DIRTN=0)  => track increases by 1
+direction = OUTWARD (DIRTN=1)  => track decreases by 1
+
+track=0  => /TK0=0
+track>0  => /TK0=1
+~~~
+
+The **preferred safe emulator policy** at the ends is to **saturate**, not wrap: outward steps while at 0 remain at 0; inward steps while at 79 remain at 79. **[OPEN]** Verify end-stop behaviour and whether a more exact MFD-51W response is needed for exotic software. Never allow an invalid index to address SPI flash beyond the 80-track layout.
+
+Disk insertion or removal does not inherently change the head's current radial coordinate. A **power-on initialization**, however, is a separate event (see `7.6).
+
+Track-zone transitions (15→16, 31→32, 47→48, 63→64 and reverse) affect GCR/rotation-generation parameters and buffered track selection, **not the count of steps**; the timing/data-engine interaction is covered in Sections 8, 10 and 12.
+
+### 7.3 The Macintosh Plus seek algorithm — one step per command
+
+**[ROM]** [`E_Sony_Seek / Sony_Seek`, lines 1365–1432](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1365-L1432).
+
+The ROM is given a desired track in `D6`; **bit 11 is the selected side and is cleared before radial seeking**. It first calls `Sony_SetSpeed` for the *target track zone* (new-interface/800K drives use the self-regulated speed path).
+
+For the ordinary case where the driver's stored track is known:
+
+1. Read the driver's software `Track` variable (`D7`). If it equals the target, there is **no step**.
+2. Compare current and target tracks.
+3. If current < target, select **`DirLAdr`** (inward, CA2=0) and a `+1` track delta; otherwise select **`DirHAdr`** (outward, CA2=1) and a `−1` delta.
+4. **Strobe the direction command** through `Sony_AdrAndStrb` (Section 6).
+5. **Read `/STEP`** via `StepLAdr`. If it is low, return a step-related error; otherwise continue.
+6. With the already-selected `StepLAdr` address, **pulse LSTRB** through `Sony_Pulse`. This requests exactly **one radial step**.
+7. For an **800K/new-interface drive**, `SONY_WAIT100` polls `/STEP` until it returns high (bounded; see `7.5). For a legacy 400K drive, the branch uses a fixed wait instead.
+8. Repeat until the desired track is reached.
+9. At the end, take the **new-interface `/READY` path**, not an old 400K mechanical head-settle delay; see `7.5.
+
+**Important:** The ROM stores its *expected* next track in its own variables before it issues the step command; that is a **software prediction**, not a report that the drive has physically arrived. The emulator must ensure that every accepted pulse results in one coherent virtual-track update. If a host step cannot be accepted, it must not silently advance the internal track.
+
+If the ROM considers its stored position *unknown* (negative `Track`), it calls recalibration first; the exact retry flow and caller-level destination handling should be tested rather than assuming a full recalibration-and-seek sequence is always performed in this one routine.
+
+### 7.4 Step acknowledgement and the meaning of `/STEP`
+
+**[DOC]** The original drive treats the falling transition of `/STEP` as the accepted head-position-counter increment/decrement. It then **automatically restores `/STEP` high** as acknowledgement. The host polls the RD mux at project `0x2`; `/STEP=1` tells it that another step may be requested.
+
+Consequences:
+
+- A single accepted **LSTRB rising edge** with `CA1=0, CA0=1, SEL=0, CA2=0` produces **one** step request; continued LSTRB high does not repeat it.
+- The host does **not** hold the physical `/STEP` line low externally. The host *writes the drive command*; the drive's **internal `/STEP` state** briefly becomes low, then returns high.
+- The **`StepHAdr`** (project `0xA`) encoding is a possible high-value write, **not** something required after each normal step.
+- `/STEP` must not be used as a synonym for `/READY`. The former means the request was accepted/released; the latter controls the host's subsequent data access.
+
+**[DECISION]** A virtual track update may occur **immediately upon acceptance** of a valid step; however, its **feedback waveform** must satisfy the interface's pulse characteristics. A hardware timer or other deterministic device may be needed for the brief low-to-high acknowledgement. Do not preserve a millisecond “motor movement” delay just to make stepping appear mechanical.
+
+**[OPEN]** Confirm whether an extremely brief low period must actually be externally observable for *all* Plus ROM polling paths. For initial conformance, use a bounded pulse respecting the documented original-drive low pulse width rather than forcing `/STEP=1` permanently.
+
+### 7.5 Timing: electrical handshake versus physical-mechanism limits
+
+**[DOC]** Both original **699-0321** (1985, head-access timing figure, printed sheet 27) and **699-0452-A** (1986, `3.4.3, printed sheets 26–27, and `3.4.6, printed sheet 31) provide the following characteristics. The two revisions agree on the principal values.
+
+| Parameter | Original-drive requirement/limit | Meaning for our emulator |
+|---|---|---|
+| /ENBL active before changing DIRTN (figure T6) | **≥0.5 µs** | Observe selection/setup; host ordinarily provides it |
+| Direction established before STEP (T1) | **≥1.0 µs** | Honour host command order; never let two strobes collapse into one |
+| **/STEP low pulse width** (T2) | **0.5–72 µs** | Real *interface feedback* pulse; do not model milliseconds of physical travel |
+| Additional direction/step separations (T3–T5) | **≥0.5 µs each** | Physical command/pulse spacing constraints; verify with analyser |
+| Write gate off before beginning a STEP (`3.4.3.2) | **≥620 µs** | Prevent head change across a live write; cross-check write-path integration |
+| /READY becomes not-ready following STEP (`3.4.3.3) | **≤150 µs** | Original drive invalidates readiness when head movement begins |
+| /READY after one step in same speed block | **≤36 ms** | Original physical settling ceiling; **not** a mandatory firmware delay |
+| /READY after one step with speed-block change | **≤152 ms** | Includes original speed adjustment; **not** a mandatory firmware delay |
+| /READY after maximal-rate run of steps | **≤600 ms** | Original mechanism worst-case upper bound; **not** a mandatory firmware delay |
+| /TK0 state transition after crossing track-zero boundary (`3.4.6) | **≤6 ms** | STM32 can update logically much sooner |
+
+**Interpretation:** The **minimum** spacing/pulse requirements are real protocol constraints. The large **maximum** times primarily describe how slowly a *mechanical* drive may complete a movement; they do **not** require the emulator to delay for 36/152/600 ms. It is acceptable in principle to present stable /READY sooner **if the requested track's timed GCR stream is already prepared and host-visible ordering remains correct**.
+
+**[DECISION]** Avoid a fixed “seek duration” in firmware. The emulator must instead be ready for the next command/status read as soon as its logical state and any required output buffers are coherent.
+
+**[OPEN]** The source's `/READY` waveform and exact minimum observed transition time should be validated in tests; the diagram specifies an upper bound, not a minimum time for remaining not-ready. If the host assumes a detectable busy phase in an untested code path, measure and accommodate that demonstrable requirement rather than inventing a delay pre-emptively.
+
+### 7.6 /READY, /TK0, disk presence, and power-on initialization
+
+**/TK0 is a head-position report, not media identification.**
+
+**[DOC]** The original `/TK0` status is **low** when the head is on track 0 *or farther outward than track 0*. The hardware description notes that it is **latched** and updated by the physical track-zero sensor **only when the mechanism is not in power-save mode**. Thus it is not simply a continuously live sensor output under all power states.
+
+**[DECISION]** For the initial emulator, present `/TK0=0` iff virtual `track=0` while the drive is selected. Keep the virtual track on ordinary enable/disable transitions; do not reset it merely because `/ENBL` is high. More exact latch/power-save nuances are a validation item if required by software.
+
+**/READY is different from step acknowledgement.**
+
+**[DOC]** Original `/READY=0` means the mechanism can transfer data: disk in place, requested head position settled, and motor at the required speed. **[DECISION]** For the STM32 this maps to *real logical readiness*: cartridge present, no write/media-transition fault, motor logically on, and the appropriate track/head data ready for the timed bitstream engine. A virtual track change must invalidate any **stale** stream and select/reconfigure the new track before advertising readiness. Never return `/READY=0` merely because `/STEP` has released if storage preparation is still incomplete.
+
+**Power-on baseline:**
+
+**[DOC]** Sony specifies that the head is **automatically taken to track 0 on power-up** (`3.5.3, both revisions). Therefore, **[DECISION]** initial `track=0` is the right electronic equivalent. This says nothing about whether the cartridge is inserted or the spindle logically running.
+
+**Power-down/disable:**
+
+**[DOC]** On `/ENBL` high, `/DIRTN` is preset to 0 and `/MOTORON` to off, while the physical-drive mechanism may still complete an in-progress operation. **[DECISION]** Preserve virtual head position across enable disable; on re-enable, there must be no phantom step or recalibration unless commanded. Preserve persistent media state independently of drive-enable.
+
+**[OPEN]** Verify exact response to power interruption during a pending write, especially whether the logical track should be reinitialised at MCU restart (power-on) independently of media-content recovery.
+
+### 7.7 The Macintosh Plus recalibration (home-to-track-zero) procedure
+
+**[ROM]** [`E_Sony_Recal / Sony_Recal`, lines 1558–1636](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1558-L1636).
+
+The ROM's recalibration routine is not a special hardware command. It is a **sequence of ordinary status reads and direction/step commands**:
+
+1. Invalidate the cached track data.
+2. Ensure that the IWM is in its intended mode, and power/select the drive as needed. The ROM may program the IWM mode register and then power the drive up.
+3. Initialise a bounded **track-zero search** (source starts its counter at `0x50` = 80).
+4. On each iteration, wait the driver's nominal inter-step interval: **12 ms for old-interface 400K**, but **6 ms for new-interface 800K** (the ROM halves `SeekTime`).
+5. Read **`/TK0`**. If **low**, recalibration succeeds and the driver stores `Track=0`.
+6. Otherwise strobe **DIRTN outward** (`DirHAdr`), check **`/STEP`** is **high**, then issue a **STEP-low strobe** (`StepLAdr`).
+7. Repeat until track zero is found or the bounded counter expires.
+
+An **initial zero track** makes this procedure finish at the first `/TK0` check, but even if the virtual track is 79, repeated outward steps will eventually reach zero.
+
+**[ROM]** If `/STEP` is low when the routine wants another step, it reports **`cantStepErr = −75`**. If the counter expires without `/TK0` becoming low, it reports **`tk0BadErr = −76`**. An IWM setup failure is separately reported as **`initIWMErr = −77`**. These errors are **ROM-side outcomes**, not error bytes sent over the Sony connector.
+
+The source's decrement/test occurs before issuing a step at the exhaustion boundary; treat **80 as the nominal search bound**, not a promise that precisely 80 hardware pulses always occur.
+
+### 7.8 The ROM's post-seek polling and error behaviour
+
+**[ROM]** [`SONY_WAIT100`, lines 1434–1445](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1434-L1445) differs by interface generation:
+
+- **Old-interface 400K mechanism:** fixed `SeekTime` (12 ms) via the ROM's delay path.
+- **New-interface 800K mechanism:** poll **`/STEP`** repeatedly, with an initial loop counter of `0x50` (up to about 81 iterations). This is a **poll count**, not a promise of exactly 81 µs.
+- The next iteration again checks `/STEP=1` before sending a new step. A device that leaves `/STEP` low indefinitely can fail with `cantStepErr`.
+
+After seeking, [`SONY_WAITREADY`, lines 1466–1485](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1466-L1485) checks **`/READY`** for a **new-interface 800K drive**:
+
+- For the **post-seek** path, the ROM first waits **500 µs**, then polls `/READY`.
+- It polls at roughly **1 ms** intervals, using a counter initialized for approximately **1 second** of polling.
+- **Crucial:** on timeout the ROM **continues anyway**; it does not itself report a `/READY` timeout error at this point. A device stuck not-ready may consequently cause downstream read/write failures.
+- For the **old-interface 400K path**, it uses the previously specified fixed waiting interval instead.
+
+**[DECISION]** We must supply **correct /STEP and /READY statuses**, not artificially reproduce either the ROM's built-in delays (the host already waits) or the Sony mechanism's additional mechanical time. In particular, **responding ready early is not forbidden by the cited maximum-only head-settle timing**, provided actual read/write operations are serviceable.
+
+### 7.9 Preliminary STM32 state and event model
+
+The following is a **functional contract**, not a choice of interrupt, DMA or timer implementation.
+
+~~~text
+State:
+    track: integer 0..79                # one radial position shared by both sides
+    direction: INWARD / OUTWARD
+    step_feedback: HIGH / LOW
+    motor_commanded: ON / OFF
+    cartridge_present: bool
+    track_stream_ready: bool             # prepared/selected data for current track
+    write_active: bool
+    ready: derived logical status
+
+On MCU power-on (after hardware-safe initialization):
+    track = 0                            # original Sony power-on homes to zero
+    direction = INWARD                  # /DIRTN preset low
+    step_feedback = HIGH
+    motor_commanded = OFF
+    track_stream_ready = false          # until data preparation is complete
+
+On qualified DIRTN write:
+    direction = (CA2 == 0) ? INWARD : OUTWARD
+
+On qualified STEP-low write (one valid LSTRB rising edge):
+    if step_feedback is HIGH and acceptance conditions hold:
+        step_feedback = LOW
+        next_track = clamp(track + (direction == INWARD ? +1 : -1), 0, 79)
+        track = next_track
+        invalidate_or_switch_track_stream(track)
+        schedule_step_feedback_return_to_HIGH()   # bounded electrical pulse
+    else:
+        do_not_create_an_extra_step()              # exceptional case policy pending
+
+On the scheduled feedback release:
+    step_feedback = HIGH
+
+RD status mux whenever enabled:
+    project 0x2 -> step_feedback
+    project 0x5 -> (track == 0) ? LOW : HIGH
+    project 0xD -> ready ? LOW : HIGH
+
+ready is true only if:
+    cartridge_present
+    and motor_commanded == ON
+    and selected track/head data can be served correctly
+    and there is no conflicting write/media transition
+
+On normal drive disable (/ENBL rising):
+    tri_state(RD)
+    direction = INWARD
+    motor_commanded = OFF
+    retain track and cartridge state
+    do_not_generate_step()
+~~~
+
+**Technical refinement:** The status mux reads shared state that changes in the command decoder. The actual STM32 design must publish a **coherent track/status/data-stream state**, avoiding an instant when `/TK0` reflects a new track but a stale track's GCR bitstream is still emitted. A track-cache switch may occur immediately if the required data is resident in memory; otherwise set `/READY` to not-ready until it is prepared. We need no artificial motion timer.
+
+**Out-of-range and unexpected-input policy remains provisional:** Clamp at 0/79 for safety; do not interpret head/side changes as track steps; do not advance during a disallowed write/transition. The exact behaviour after a step request during `/WRREQ` asserted, rapid re-strobe, cartridge removal and simultaneous state transitions needs test coverage and Section 11 integration.
+
+### 7.10 Verification matrix and remaining questions
+
+| Scenario | Expected result | Status |
+|---|---|---|
+| MCU power-on, no cartridge | `track=0`; `/TK0=0` when enabled; `/READY=1` | [DECISION] based on [DOC] power-on homing |
+| Strobe DIRTN inward, then STEP low | Track increases exactly once; `/STEP` acknowledges and returns high | [DOC]/[ROM] |
+| Strobe DIRTN outward, then STEP low | Track decreases exactly once | [DOC]/[ROM] |
+| Hold LSTRB high after STEP | No multiple steps | [DOC] |
+| Attempt step at track 0 outward | Track does not wrap below 0; `/TK0=0` | [DECISION], end-stop fidelity [OPEN] |
+| Attempt step at track 79 inward | Track does not wrap above 79; safe image bounds | [DECISION], end-stop fidelity [OPEN] |
+| Seek across zones 15→16, etc. | Exactly one step; stream/speed-zone metadata switched before `/READY=0` | [DECISION] |
+| Read `/STEP` while low/high | Correct feedback, not mistaken for `/READY` | [DOC]/[ROM] |
+| Recalibrate from virtual track 79 | Repeated outward steps; eventually `/TK0=0`; ROM stores track 0 | [ROM] |
+| Recalibrate already at 0 | First `/TK0` read succeeds; no unnecessary step | [ROM] |
+| Leave `/STEP` low forever (negative test) | ROM cannot continue normal seeks; expected `cantStepErr` path | [ROM] |
+| Leave `/TK0` high forever (negative test) | ROM bounded recalibration fails with `tk0BadErr` | [ROM] |
+| Interrupt stream preparation with a step | `/READY` reflects real ability to supply new track; never serves wrong track as ready | [DECISION] |
+| Disable and re-enable without MCU power loss | Virtual track retained; no phantom step | [DECISION] |
+| Change SEL/head without stepping | Same track, different side's data; no radial movement | [DOC] |
+
+**Open work before acceptance:**
+
+1. Validate whether `/STEP` needs a timer-generated **0.5–72 µs** low interval or whether a simpler response can provably satisfy both ROM and original-interface timing; prefer source-spec compliance.
+2. Reconcile high-impedance/disable/power-save effects on the original **latched /TK0** with our continuously derived `track==0` model.
+3. Confirm saturated-track boundary behaviour at track 79 and any beyond-track-zero handling needed for nonstandard software.
+4. Validate **620 µs write-gate-to-step** exclusion against the eventual write-data input path and flash commit logic.
+5. Determine whether any compatibility-critical driver requires an observable **/READY** not-ready phase after a step even if the selected data is immediately ready. Treat this as a measurement question, *not* a reason to add an arbitrary seek delay.
+6. Establish timer/capture and RD-status publication latency under worst-case STM32 GCR generation and SPI flash activity.
+7. Recheck any detailed differences for MFD-51W versus MFD-51W-03 using real hardware, while retaining the shared 20-pin profile with **pins 9 and 20 NC**.
+
+**Next related operations:** Section 8 will specify motor control, ready and tachometer in depth; Section 10 covers the track/head bitstream and the data-engine readiness handoff; Section 11 will resolve seek/write exclusion.
 
 ## 8. Operation: motor, ready handshake and tachometer
 
@@ -526,5 +786,6 @@ At any time when /ENBL is LOW:
 
 ### Change history
 
+- **2026-11-06 (Section 7):** Expanded the ROM-driven one-track seek and recalibration operations, /STEP acknowledgement versus /READY, /TK0 status, original step/access timing diagrams and limits, 80-track geometry, immediate virtual stepping, STM32 state model and validation matrix. Documented hardware-only physical timing as *limits*, not required artificial delays.
 - **2026-11-06 (Section 6):** Added the eight-pattern /DIRTN, /STEP, /MOTORON and EJECT command table, LSTRB rising-edge protocol, both 1985/1986 timing references (including an explicit T4/T5 discrepancy), actual Plus ROM issue sequences, short 800K eject handling, and an STM32 command decoder/test model. Sections 5 and 7–16 remain for later analysis.
 - **2026-11-06:** Created Document 06: operation-first contents and a detailed, source-referenced **status-read** section. Correctly distinguished ROM address notation from project notation, identified ROM startup probes, and left unverified/read-unassigned outputs explicitly open. All subsequent operations remain scaffolded.
