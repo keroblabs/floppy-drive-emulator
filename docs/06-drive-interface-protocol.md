@@ -27,6 +27,15 @@
    - [4.8 Remaining verification](#48-remaining-verification)
 5. [Operation: drive selection, initialisation and disable](#5-operation-drive-selection-initialisation-and-disable)
 6. [Operation: writing command latches with LSTRB](#6-operation-writing-command-latches-with-lstrb)
+   - [6.1 Purpose and distinction from status reading](#61-purpose-and-the-essential-distinction-from-status-reading)
+   - [6.2 Eight command-value encodings](#62-full-command-value-map--eight-combinations-four-functions)
+   - [6.3 LSTRB write cycle and timing](#63-lstrb-write-cycle-sequence-and-required-timing)
+   - [6.4 Macintosh Plus ROM command routine](#64-how-the-macintosh-plus-rom-actually-issues-commands)
+   - [6.5 Control semantics and readback](#65-control-semantics-automatic-release-and-readback)
+   - [6.6 800K software eject](#66-the-special-800k-eject-sequence)
+   - [6.7 Disable and reset](#67-disable-reset-and-operation-lifecycle)
+   - [6.8 STM32 decoder model](#68-preliminary-stm32-command-decoder-model)
+   - [6.9 Tests and open items](#69-tests-boundaries-and-open-verification)
 7. [Operation: seek, step, direction and recalibration](#7-operation-seek-step-direction-and-recalibration)
 8. [Operation: motor, ready handshake and tachometer](#8-operation-motor-ready-handshake-and-tachometer)
 9. [Operation: disk insertion, protection and eject](#9-operation-disk-insertion-protection-and-eject)
@@ -222,7 +231,230 @@ This demonstrates **logical status selection**, not the real-world delay after i
 
 ## 6. Operation: writing command latches with LSTRB
 
-**TO DEVELOP.** ROM: [`Sony_AdrAndStrb` / `Sony_Pulse`](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1213-L1227); equates `DirLAdr`, `DirHAdr`, `StepLAdr`, `MtrOnAdr`, `MtrOffAdr`, `EjectHAdr`. Provide full command/latch table: CA0/CA1/SEL select target, CA2 supplies value, LSTRB edge commits. Detail polarity, reset value, write timing, readback, and command acceptance while not ready.
+**Status:** Command-address mapping, command acceptance edge and actual Macintosh Plus ROM calls established from original sources. Precise revision-specific output timing, exceptional sequences and STM32 latency margin remain subject to electrical verification.
+
+### 6.1 Purpose and the essential distinction from status reading
+
+**[DOC]** The Sony MFD-51W control interface has **four writable control functions**: **/DIRTN** (direction), **/STEP**, **/MOTORON** and **EJECT**. The host selects a command with **CA1, CA0 and SEL**, places the **new control value on CA2**, and sends a **low–high–low pulse on LSTRB** (PH3, connector pin 8). The drive captures the command at the **rising edge**, provided the drive is enabled. The subsequent falling edge ends the pulse; it is *not* the latch-write edge.
+
+The same four CA/SEL inputs also choose the **RD/status source** described in Section 4. A specific four-bit combination can therefore have one meaning **during a status read** and a different meaning **when LSTRB is strobed**. Merely placing an address on the lines **must not** execute a command.
+
+**[ROM]** This separation is implemented explicitly: `Sony_AdrAndSense` selects a register and reads the IWM SENSE/status path; `Sony_AdrAndStrb` selects a register and then invokes `Sony_Pulse` to strobe LSTRB.
+
+**[DECISION]** The STM32 command decoder reacts to *qualified LSTRB rising edges*, not to CA/SEL changes alone. No dependency on a physical motor, head actuator or eject-solenoid implementation is implied.
+
+### 6.2 Full command-value map — eight combinations, four functions
+
+All four documented command functions have **SEL=0**. For these functions, **CA1:CA0** selects the latch and **CA2** sets its value. The table shows both the project's four-bit address convention (Section 4.2) and the **numeric address used by the Macintosh Plus ROM**. These are *command strobes*, not status reads.
+
+| Function | CA1 | CA0 | SEL | CA2 | Project selector | ROM address / symbol | Interpretation of the strobe |
+|---|---:|---:|---:|---:|---|---|---|
+| **/DIRTN** | 0 | 0 | 0 | 0 | `0x0` | `0` / `DirLAdr` | Set stepping inward (higher track numbers) |
+| **/DIRTN** | 0 | 0 | 0 | 1 | `0x8` | `1` / `DirHAdr` | Set stepping outward (toward track 0) |
+| **/STEP** | 0 | 1 | 0 | 0 | `0x2` | `4` / `StepLAdr` | Assert low: request one step |
+| **/STEP** | 0 | 1 | 0 | 1 | `0xA` | `5` / `StepHAdr` | Write high/released; *not* used for ordinary stepping by the Plus ROM |
+| **/MOTORON** | 1 | 0 | 0 | 0 | `0x4` | `8` / `MtrOnAdr` | Turn motor on |
+| **/MOTORON** | 1 | 0 | 0 | 1 | `0xC` | `9` / `MtrOffAdr` | Turn motor off |
+| **EJECT** | 1 | 1 | 0 | 0 | `0x6` | `12` / `EjectLAdr` | Write low/inactive value; semantics during an active eject need confirmation |
+| **EJECT** | 1 | 1 | 0 | 1 | `0xE` | `13` / `EjectHAdr` | Set EJECT high and begin the ejection operation |
+
+**[DOC]** Hardware definitions: Apple 699-0321 (August 1985), ``3.1.2, 3.2.3–3.2.4; Apple 699-0452-A (September 1986), same sections. **[ROM]** Command symbols: [`sonyequ.inc` lines 278–308](https://github.com/jonathanschilling/mac_rom/blob/main/include/sonyequ.inc#L278-L308).
+
+**Two important address collisions:**
+
+- **Project `0xA`** is *unspecified as a normal 800K status read* (Section 4), **but a defined write** for `/STEP=1`. The ROM also uses the same physical selection as a special **HD20 /Exist sense probe**, but that is not ordinary 800K floppy status.
+- **Project `0xE`** selects **/DRVIN** when read as a status, **but triggers EJECT** when its value is strobed. A status read of `0xE` must never eject media.
+
+No control functions at **SEL=1** are defined for these four 800K commands. **[DECISION]** Do not invent latch writes for those combinations. The 1985/1986 specifications and the Plus ROM support the eight command encodings listed above.
+
+### 6.3 LSTRB write-cycle sequence and required timing
+
+**[DOC]** Host-to-drive write procedure:
+
+1. **Enable the intended drive:** `/ENBL.INT = 0` (connector pin 14). A disabled drive must not accept a normal write as if enabled.
+2. **Prepare the command:** set **CA0/CA1/SEL** to the target function and **CA2** to the desired value. Keep **LSTRB low** while the selector is being changed.
+3. **Meet address setup:** hold CA0/CA1/CA2/SEL stable before the strobe.
+4. **Assert LSTRB high:** the **rising edge** causes the drive to sample **CA2** into the selected control function (or to initiate the corresponding operation).
+5. **Maintain the required high pulse width**, then bring **LSTRB low**.
+6. Permit selector changes for the next operation only after completing the pulse; observe the safe **SEL-switching** sequence below.
+
+Timing figures from the original manufacturer's command timing diagrams (printed **sheet 26** of Apple 699-0321, and **sheet 25** of Apple 699-0452-A):
+
+| Figure parameter | 1985 699-0321 | 1986 699-0452-A | Interpretation / STM32 relevance |
+|---|---|---|---|
+| **T1** | **0.5 µs minimum** | **0.5 µs minimum** | Selector stable before LSTRB rises |
+| **T2** | **1.0 µs minimum** | **1.0 µs minimum** | LSTRB-high pulse width |
+| **T6** | **0.5 µs minimum** | **0.5 µs minimum** | Enable-to-address sequencing interval shown in the diagram |
+| **T4** | **1.0 µs minimum** as printed | **1.0 µs maximum** as printed | Post-strobe latch-response interval; **specification discrepancy, do not silently choose one** |
+| **T5** | **0.5 µs minimum** as printed | **0.5 µs maximum** as printed | Latch response around drive disable; **specification discrepancy** |
+
+**[OPEN] Timing discrepancy:** The two diagrams print opposite **min/max** qualifications for **T4 and T5**. The 1986 diagram is a later revision, but this document does **not** claim that its limits automatically supersede those of the original MFD-51W. Confirm against the source hardware/electrical test plan before establishing timing-related MCU requirements. T1/T2/T6 are consistent in both documents.
+
+The 800K **EJECT** cycle has additional constraints and is *not* simply an arbitrarily long general-purpose strobe; see `6.6.
+
+### 6.4 How the Macintosh Plus ROM actually issues commands
+
+**[ROM]** The relevant code is:
+
+- [`Sony_AdrDisk`, lines 1159–1194](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1159-L1194): converts the **ROM address** in D0 into PH0/PH1/PH2 (CA0/CA1/CA2) and VIA **SEL** levels.
+- [`Sony_AdrAndStrb` / `Sony_Pulse`, lines 1213–1227](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1213-L1227): writes the selected latch by pulsing PH3/LSTRB.
+- [`Sony_Seek`, lines 1394–1417](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1394-L1417); [recalibration around lines 1613–1625](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1613-L1625): direction and step.
+- [motor control around lines 1650–1678](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1650-L1678); [eject routine around lines 440–480](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L440-L480).
+
+The ROM drives PH3 with two **IWM memory-mapped accesses** and uses two NOP instructions between them as a pulse-width delay:
+
+~~~asm
+; Conceptual excerpt from Sony_Pulse; A0 points to the IWM
+    TST.B   ph3H(A0)     ; PH3/LSTRB rises -> drive samples command
+    NOP
+    NOP                 ; ensure adequate high width
+    TST.B   ph3L(A0)     ; PH3/LSTRB falls -> finish the pulse
+~~~
+
+The routine temporarily masks processor interrupts around this pulse, preventing a host-side service routine from disturbing the command sequence. **There is no IWM command byte sent to the drive**; changing IWM phase-line register states *physically produces* CA0/CA1/CA2/LSTRB.
+
+**Address-changing discipline:** `Sony_AdrDisk` first drives **CA0 and CA1 high**, then changes CA2, sets VIA **SEL**, and finally lowers CA0/CA1 to their requested levels. The source notes that **CA0=CA1=1 must be maintained while SEL changes from 1 to 0**. Preserve this observation in the protocol tests; the emulator must not inadvertently execute commands during intermediate selection states.
+
+### 6.5 Control semantics, automatic release and readback
+
+**/DIRTN — direction**
+
+- **CA2=0:** inward, toward the disk centre / increasing track numbers.
+- **CA2=1:** outward, toward track zero.
+- **[DOC]** On drive disable (`/ENBL=1`), /DIRTN is preset to **0**.
+- The original mechanism prohibits changing direction during head movement or settling. **[DECISION]** A virtual head does not need mechanical settling, but command ordering and valid step direction must remain coherent.
+- Its feedback is selectable on RD at **project `0x0`** (Section 4).
+
+**/STEP — one movement request, not a persistent “seek active” flag**
+
+- A **low-going /STEP** command (CA2=0 at the accepted LSTRB rising edge) starts a one-track step according to the current /DIRTN.
+- **[DOC]** The original drive accepts the falling /STEP event into its destination-track counter and then **releases /STEP to high automatically**. The Plus ROM waits for it to be high before issuing the next low-step strobe.
+- `StepHAdr` (CA2=1) exists in the bit map, but normal seek/recalibration uses **`StepLAdr`** and the drive's automatic release. **Do not require an explicit STEP-high host write** for stepping to complete.
+- `/STEP` status feedback is read at **project `0x2`**; distinguish this short acknowledgement from longer mechanical **/READY** behaviour.
+- The virtual track update may be immediate once the step event is accepted, but the **/STEP feedback timing** needs validation (Sections 7 and 14).
+
+**/MOTORON — spindle command**
+
+- **CA2=0:** motor commanded **on**; **CA2=1:** motor **off**.
+- **[DOC]** On `/ENBL=1`, /MOTORON is preset **high** (off).
+- The Plus ROM checks `/MOTORON` status at **project `0x4`**, strobes `MtrOnAdr` only if needed, and also uses `MtrOffAdr` during power-down.
+- The emulated motor is a *logical* state controlling readiness and data emission; it is not a requirement to spin a physical mechanism or wait for rotational inertia.
+
+**EJECT — command-triggered operation, not merely a software-held level**
+
+- **CA2=1** at the eject command strobe starts an eject operation; the original drive sets EJECT high on the **LSTRB rising edge**.
+- **[DOC]** EJECT returns low when **/CSTIN rises** (disk no longer in place) or after an approximately **2-second maximum** timeout. The drive initializes EJECT low at power-on.
+- The original eject mechanism can continue completing an initiated eject even if **/ENBL goes high**; a drive-disable transition is *not* proof that ejection should be aborted.
+- `EjectLAdr` (CA2=0) is defined as a low command value, but the Plus ROM normally sends **`EjectHAdr`**, then allows the drive to terminate its operation. **[OPEN]** Whether an explicit low strobe has abort semantics during active eject has not been established; do not invent it.
+- The RD selection at **project `0x6`** is labelled EJECT by Apple's 800K table, but original MFD-51W readback details remain under review in Section 4.
+
+### 6.6 The special 800K eject sequence
+
+The 800K mechanism has **software ejection through LSTRB** even with emulator connector **pin 9 unconnected**. The direct hardware eject signal on certain mechanism revisions is a different interface and is *not* needed for this command.
+
+**[ROM]** The Plus driver's floppy eject routine performs the following sequence ([`SONY_CTL_EJECT` and `SONY_NEWDRVEJECT`, lines 440–480](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L440-L480)):
+
+1. Invalidate the drive's cached sectors and command **motor off**.
+2. Keep/reselect the floppy interface, then wait **200 ms**.
+3. Select **`EjectHAdr`** = ROM address 13 = **project `0xE`**: CA1=1, CA0=1, SEL=0, CA2=1.
+4. Bring **LSTRB high** to start eject.
+5. For the **new-interface 800K drive**, bring **LSTRB low promptly** to finish a **short pulse**. The old-interface 400K path instead keeps LSTRB high for approximately **0.75 s**.
+6. Poll **/CSTIN** (project `0x1`) until it becomes **1** (disk out), using 100-ms waits and a bounded retry count (up to approximately **1.6 s** of polling), then wait another **1 ms**. The driver subsequently applies its own disk-present suppression interval.
+
+**[DOC]** Apple's eject timing diagram (699-0321 printed sheet 33; 699-0452-A printed sheet 32) specifies approximately:
+
+| Quantity | Source requirement | Relevance |
+|---|---|---|
+| Motor-off before eject request | **≥200 ms** | The ROM explicitly waits 200 ms |
+| LSTRB-high eject pulse | **≥1.0 µs, ≤300 ms** | The Plus uses the short 800K pulse, *not* 400K's long pulse |
+| /CSTIN transition after eject request | **≤1.5 s** | Mechanical operation limit, not a mandatory artificial STM32 delay |
+| Drive remains enabled after /CSTIN goes high | **≥150 µs** | The ROM waits at least another 1 ms after detecting no disk |
+| EJECT internal active-state timeout | **≤2 s** (separate functional description) | Bound the command state if no eject completion is observed |
+
+**[DECISION]** For the STM32, distinguish **command accepted**, **logical media removed**, and **physical cartridge released**. The user-visible cartridge mechanism may be much simpler than Sony's, but the Macintosh must receive coherent **/CSTIN** and (where relevant) EJECT transitions. Do not *force* 200 ms of MCU-internal motor simulation; the **host** already performs that pre-eject wait.
+
+### 6.7 Disable, reset and operation lifecycle
+
+The original specifications state that **/ENBL high** disables communication, places RD in **high impedance**, and presets control latches to documented inactive defaults. At least:
+
+- **/DIRTN = 0** (inward direction).
+- **/MOTORON = 1** (motor off).
+- **EJECT = 0** at *power-on*; an **ongoing eject** can continue across interface disable.
+- **/STEP** is normally released high after an accepted request. Its precise disable/reset pulse behaviour remains **[OPEN]**; avoid manufacturing a step on re-enable.
+
+**[DECISION]** Do not reset the *virtual track number*, mounted media state, or persistent flash state merely because /ENBL is deasserted. Those are different from the transient command latches. Likewise, no deferred command should be spuriously executed when the drive is re-enabled if LSTRB was already high.
+
+These reset/lifecycle rules should be reconciled with Section 5 when that section is developed.
+
+### 6.8 Preliminary STM32 command-decoder model
+
+This is **pseudocode for the observable interface**, not a polling-loop or interrupt-latency design:
+
+~~~text
+On /ENBL changing inactive (HIGH):
+    tri_state(RD)
+    direction = INWARD                  # documented preset
+    motor_commanded = OFF               # documented preset
+    release_step_output_if_appropriate() # verify precise STEP timing
+    # An eject already in progress is NOT necessarily cancelled.
+    # Do not reset virtual track/media merely because enable is inactive.
+
+On LSTRB rising:
+    if /ENBL is not LOW:
+        ignore command
+    else:
+        atomically_sample(CA1, CA0, SEL, CA2)
+        if SEL != 0:
+            no documented MFD-51W command: do not invent one
+        else if CA1:CA0 == 00:          # DIRTN
+            direction = (CA2 == 0) ? INWARD : OUTWARD
+        else if CA1:CA0 == 01:          # STEP
+            if CA2 == 0:
+                accept_one_step(direction)
+                step_feedback = LOW, then release to HIGH
+            else:
+                step_feedback = HIGH    # precise hardware effects open
+        else if CA1:CA0 == 10:          # MOTORON
+            motor_commanded = (CA2 == 0) ? ON : OFF
+        else if CA1:CA0 == 11:          # EJECT
+            if CA2 == 1:
+                start_eject_operation()
+            else:
+                low/inactive command value; no assumed abort semantics
+
+On LSTRB falling:
+    end strobe pulse; DO NOT write command a second time
+
+At any time when /ENBL is LOW:
+    RD = read_selected_source(CA2, CA1, CA0, SEL)
+    # Status/data mux is separate from the LSTRB command decoder.
+~~~
+
+**Architecture caution:** ROM pulses are microseconds long. The final STM32 implementation must capture **LSTRB edges** and handle RD/status changes deterministically; a slow, occasionally scheduled polling loop is not an approved implementation. Timer/input-capture, external logic or interrupt-assisted buffering are candidates for Section 15.
+
+### 6.9 Tests, boundaries and open verification
+
+| Test | Expected host-visible observation | Evidence |
+|---|---|---|
+| Change CA0/CA1/CA2/SEL, no LSTRB pulse | RD selection may change; **no control command executes** | [DOC] |
+| Strobe DIRTN=0 / DIRTN=1 | Direction feedback and subsequent step direction follow requested value | [DOC]/[ROM] |
+| Strobe STEP=0 once | Exactly **one** virtual step, then /STEP returns high | [DOC]/[ROM] |
+| Strobe STEP=1 | No *additional* step generated | [ROM], other semantics [OPEN] |
+| Strobe MOTORON=0 / MOTORON=1 | Motor feedback becomes on/off | [DOC]/[ROM] |
+| Strobe EJECT=1 | Eject operation initiated; /CSTIN becomes absent when logically removed | [DOC]/[ROM] |
+| Read project `0xE` without stroking | /DRVIN sense read; **never triggers eject** | [DOC] |
+| Strobe project `0xA` | STEP-high write encoding; **not** a valid ordinary 800K read status | [DOC]/[ROM] |
+| Hold LSTRB high without another rising edge | No repeated step or multiple eject requests | [DOC] |
+| /ENBL inactive | Commands ignored; RD high impedance; default latches; pending eject completion respected | [DOC], exact edge cases [OPEN] |
+| Drive disable/re-enable | Track/media persisted, no phantom step/eject | [DECISION] |
+
+**Still open before firmware is final:**
+
+1. Reconcile 1985 versus 1986 **T4/T5 min/max** discrepancies; verify command-edge latency requirements and robustness to selector transients.
+2. Establish exact **/STEP low duration**, acknowledgement timing and permissible re-strobe cadence, plus /READY behaviour (Section 7).
+3. Verify the original **EJECT low strobe** behaviour and any required readback semantics at project `0x6`.
+4. Decide whether a hardware pulse-capture/command-state front end is necessary for guaranteed STM32 response at the final CPU clock and interrupt load.
+5. Validate enable/high-impedance timing and pending-eject behaviour against an actual MFD-51W/-03 installation if possible.
 
 ## 7. Operation: seek, step, direction and recalibration
 
@@ -294,4 +526,5 @@ This demonstrates **logical status selection**, not the real-world delay after i
 
 ### Change history
 
+- **2026-11-06 (Section 6):** Added the eight-pattern /DIRTN, /STEP, /MOTORON and EJECT command table, LSTRB rising-edge protocol, both 1985/1986 timing references (including an explicit T4/T5 discrepancy), actual Plus ROM issue sequences, short 800K eject handling, and an STM32 command decoder/test model. Sections 5 and 7–16 remain for later analysis.
 - **2026-11-06:** Created Document 06: operation-first contents and a detailed, source-referenced **status-read** section. Correctly distinguished ROM address notation from project notation, identified ROM startup probes, and left unverified/read-unassigned outputs explicitly open. All subsequent operations remain scaffolded.
