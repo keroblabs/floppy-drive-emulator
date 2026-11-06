@@ -1,26 +1,132 @@
-# MFD-51W / MFD-51W-03 Emulator Overview
+# Macintosh Plus Floppy-Disk Emulator — Project Overview
 
-## Project objective
+**Status:** Agreed project baseline (6 November 2026)  
+**Primary target:** Macintosh Plus M0001AP  
+**Emulated device:** Sony MFD-51W 800K floppy-disk drive mechanism  
+**Primary connection:** Macintosh Plus internal 20-pin drive interface
 
-Reuse the MFD-51W / MFD-51W-03 mechanical drive chassis to build a floppy emulator that uses:
+## 1. Project objective
 
-- a custom 3D printed 3.5" cartridge
-- an internal cartridge PCB with SPI flash
-- firmware-controlled eject behavior (no dependency on original eject pin behavior)
+Develop a standalone electronic replacement for the Sony MFD-51W floppy-disk mechanism used in the Macintosh Plus. From the Macintosh's perspective, the replacement must expose the same **host-visible electrical interface and logical behaviour** as the original drive.
 
-## Scope boundaries
+The Macintosh's existing **IWM (Integrated Woz Machine)** remains the floppy-disk controller. The emulator is a **drive replacement, not an IWM/controller replacement**. The goal is to operate with the original Macintosh hardware, ROM and software without requiring patches, additional drivers or modifications to the computer.
 
-- No SD card media path in this concept.
-- Mechanical simplification is allowed where needed.
-- Additive parts (3D printed), servo-actuated elements, and sensors are in scope.
+Compatibility is defined at the **Sony drive interface**, not at the Macintosh filesystem or application layer. A compatible host controller should not need to know whether it is communicating with the original mechanism or this emulator.
 
-## Deliverables scaffold in this repository
+## 2. Foundational design decisions
 
-- Interface notes and pin mapping: `02-macintosh-20-pin-interface.md`
-- MFD-51W vs MFD-51W-03 cable differences: `03-mfd-51w-vs-mfd-51w-03.md`
-- Chassis quick-start + measurement capture guide: `04-chassis-and-mechanics-quickstart.md`
-- Cartridge-to-emulator contact concepts: `05-cartridge-contact-concepts.md`
+### 2.1 Electrical and logical emulation, not mechanical simulation
 
-## Validation-first note
+The emulator reproduces the externally observable behaviour required by the IWM, including:
 
-Some detailed values vary by drive revision and cable harness. Treat this documentation as an implementation starter and verify electrically/mechanically against your exact units before final PCB and firmware lock.
+- Input and output signal levels, polarity and safe electrical interfacing.
+- Drive control and addressed status/control responses.
+- Logical track position, head/side selection, media presence, write protection and eject state.
+- Correctly timed serial read-data output and write-data reception, with Apple GCR handling.
+- Disk-image reads and persistent writes to removable solid-state media.
+
+**We will not simulate the original mechanical processes for their own sake.** There is no requirement to model real head motion, seek settling, spindle acceleration, rotational inertia, acoustic effects or mechanically realistic delays. For example, a step command may update a digital track-position state immediately.
+
+**Interface timing still matters.** The emulated drive must preserve GCR bit-cell/data-transition timing, input/output setup and hold requirements, command sequencing and any other timing that the IWM actually depends on. A mechanical-origin delay will only be retained if tests or source documentation establish that it is necessary for interoperability.
+
+The distinction is deliberate: **omit mechanical realism; preserve host-visible compatibility**.
+
+### 2.2 Initial host and interface
+
+- Initial reference machine: **Macintosh Plus M0001AP**.
+- Initial hardware target: **internal 20-pin floppy-drive interface**.
+- Initial mechanism reference: **Sony MFD-51W**; confirm the exact hardware revision and wiring against authoritative documentation and the target machine before designing a PCB.
+- Primary disk operation: **800K double-sided**; **400K single-sided** compatibility is also an objective.
+- The emulator must support both reading and writing, including booting from compatible disk images.
+
+The Macintosh external **DB-19** interface is a possible later extension using a correctly engineered adapter or interface variant. Do not assume all Sony MFD-51W-family revisions and harnesses are pin-for-pin interchangeable. In particular, revision-specific signal use and any supply rails must be verified before hardware connection.
+
+### 2.3 Removable media concept
+
+The preferred storage design is a **3D-printed, 3.5-inch floppy-shaped cartridge** containing an **SPI flash device** and electrical contacts that mate with the emulator.
+
+- The cartridge provides removable, non-volatile disk-image storage.
+- The emulator translates drive-level reads and writes into storage operations; the Macintosh need not be aware of SPI flash.
+- An SD-card media path is **not part of the current preferred concept**.
+- Flash capacity, disk-image layout, write persistence, power integrity, contact scheme and safe removal behaviour remain to be designed.
+
+The desired physical presentation is that of an original Macintosh 3.5-inch floppy drive, with a cartridge inserted through the normal opening.
+
+### 2.4 Chassis and eject mechanics
+
+The project intends to **reuse the original drive chassis or its mounting/form-factor geometry**, preserving the Macintosh's physical appearance.
+
+The Macintosh M0001AP has an emergency manual-eject hole for a paperclip. Its presence is relevant to the future physical design, but **the ejection mechanism has not been selected**. Reuse of existing parts, 3D-printed additions, sensors and actuators are candidates, not settled requirements.
+
+Keep two concerns separate:
+
+1. **Host-visible eject behaviour:** the emulator must implement the drive's logical response to the Macintosh's eject command.
+2. **Physical cartridge handling:** insertion, retention, release and possible manual-eject operation belong to the mechanical design and need not duplicate the original drive mechanism.
+
+Detailed chassis, cartridge and contact engineering will be developed in a separate workstream.
+
+## 3. Functional architecture
+
+```text
+Macintosh Plus M0001AP
+  MC68000 / ROM
+        |
+       IWM
+        |
+  internal 20-pin interface
+        |
+  +-------------------------------+
+  | Sony MFD-51W drive emulator   |
+  |                               |
+  | Electrical host interface     |
+  | Drive state / status logic    |
+  | GCR read/write data engine    |
+  | Disk-image and write handling |
+  | SPI flash cartridge interface |
+  +-------------------------------+
+        |
+  Removable 3D-printed cartridge
+  with SPI flash and contacts
+```
+
+This is a **functional decomposition only**. We have **not** selected a microcontroller, FPGA, CPLD or hybrid implementation. That choice follows electrical-interface analysis and timing assessment; no particular processor family or polling architecture is currently committed.
+
+## 4. Explicit project boundaries
+
+**In scope:** faithful host-facing MFD-51W emulation for the Macintosh Plus, 400K/800K disk operations, removable SPI flash media, supporting electronics and the chassis/cartridge work needed to use it.
+
+**Out of scope for this repository's initial project:**
+
+- Replacing, reproducing or emulating the Macintosh's IWM controller.
+- Apple IIe or Apple IIGS controller hardware.
+- Central Point Universal Disk Controller reproduction.
+- ProDOS integration or Apple II SmartPort emulation.
+- Changes to or dependencies on the separate **Apple FPGA** project.
+- Macintosh 1.44 MB SuperDrive or HD20 hard-disk emulation as initial requirements.
+
+A future dedicated controller in the **Apple FPGA** project might drive this emulator as though it were a physical MFD-51W. That possibility is **not a requirement** for the Macintosh emulator and does not change its scope.
+
+## 5. Engineering approach
+
+1. **Specify the interface:** establish revision-specific connector mapping, voltages, electrical limits, register/control/status behaviour and GCR timing from reliable source documents.
+2. **Define the architecture:** choose digital implementation hardware only after identifying functional and timing constraints.
+3. **Implement and integrate:** develop the emulator, media storage and separate physical cartridge/chassis subsystem.
+4. **Validate on hardware:** compare host-visible behaviour with the original mechanism and test 400K/800K read, write, boot, eject and media-state handling on a Macintosh Plus.
+
+Documentation should distinguish **verified source facts**, **observations or measurements**, **agreed project decisions** and **open design questions**. Unverified assumptions must not become PCB or firmware requirements.
+
+## 6. Repository workspaces and current documentation
+
+- [02 — Macintosh 20-pin interface](02-macintosh-20-pin-interface.md): electrical connections and signal behaviour.
+- [03 — MFD-51W versus MFD-51W-03](03-mfd-51w-vs-mfd-51w-03.md): mechanism and revision differences.
+- [04 — Chassis and mechanics quick-start](04-chassis-and-mechanics-quickstart.md): mechanical measurement and development.
+- [05 — Cartridge contact concepts](05-cartridge-contact-concepts.md): removable-media contact options.
+- `source/`: firmware and/or digital-logic implementation, pending architecture selection.
+- `kicad/`: schematics and PCB design.
+- `3d-drawing/`: mechanical CAD and cartridge/chassis models.
+
+The documents above began as scaffolding and **are not automatically authoritative** where they differ from this agreed overview. Electrical details and mechanical solutions must be verified and refined in their own workstreams.
+
+## 7. Baseline principle
+
+> **We are building an electrical and logical Sony MFD-51W drive emulator, not a mechanical drive simulator or a Macintosh floppy controller.** The existing IWM must see the signals and behaviour it needs; internal implementation details and unnecessary mechanical delays are free to differ.
