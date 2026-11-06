@@ -48,6 +48,17 @@
    - [7.9 STM32 state model](#79-preliminary-stm32-state-and-event-model)
    - [7.10 Test matrix](#710-verification-matrix-and-remaining-questions)
 8. [Operation: motor, ready handshake and tachometer](#8-operation-motor-ready-handshake-and-tachometer)
+   - [8.1 Drive enable, motor and ready](#81-three-distinct-concepts-enabling-the-drive-commanding-the-spindle-and-being-ready)
+   - [8.2 Motor command and shutdown](#82-motor-control-command-addresses-readback-and-shutdown)
+   - [8.3 Five speed zones](#83-five-speed-zones-physical-800k-mechanism-versus-electronic-model)
+   - [8.4 TACH waveform](#84-tach-is-a-selected-waveform-not-a-fixed-status-bit)
+   - [8.5 ROM tach checks on 800K](#85-critical-rom-finding-800k-drives-can-still-be-tach-checked)
+   - [8.6 How ROM measures tach](#86-how-the-plus-rom-measures-tachometer-speed)
+   - [8.7 READY semantics and timing](#87-ready-definition-predicates-and-transitions)
+   - [8.8 ROM startup and polling](#88-rom-motor-power-up-and-ready-polling)
+   - [8.9 Insertion spin and disable](#89-automatic-insertion-spin-disabling-ejection-and-idle-tach)
+   - [8.10 STM32 architecture](#810-proposed-stm32-timingready-architecture)
+   - [8.11 Test matrix and open items](#811-verification-matrix-and-unresolved-details)
 9. [Operation: disk insertion, protection and eject](#9-operation-disk-insertion-protection-and-eject)
 10. [Operation: serial GCR disk-data reading](#10-operation-serial-gcr-disk-data-reading)
 11. [Operation: serial write-data capture](#11-operation-serial-write-data-capture)
@@ -722,7 +733,268 @@ On normal drive disable (/ENBL rising):
 
 ## 8. Operation: motor, ready handshake and tachometer
 
-**TO DEVELOP.** ROM: `Sony_FastPower`, `Sony_PowerUp`, `SONY_WAITREADY`, `Sony_GetFreq1`, `Sony_WaitTach`. Define motor latch, tach waveform, /READY polling, motor-off behaviour, and original zone-speed expectations. Do **not** connect pin 20 PWM.
+**Status:** Hardware speed zones, tachometer pulse count, status semantics, motor command mapping and actual Macintosh Plus ROM paths established. MCU timer allocation, undocumented stopped-tach level, power-save nuances and electrical validation remain open.
+
+**Principal finding:** The 800K drive *self-regulates motor speed*, so the Macintosh Plus does **not** use PWM to control it; however, the original Plus `Sony_ReSeek` routine can **still measure TACH on an 800K drive** during periodic speed validation. A constant `/TACH` status is **not** a safe substitute for a timer-generated waveform.
+
+### 8.1 Three distinct concepts: enabling the drive, commanding the spindle and being ready
+
+The following are **not interchangeable**:
+
+| Layer | Host/drive signal | Meaning |
+|---|---|---|
+| IWM drive-interface selection | IWM `mtrOn`/`mtrOff` access, producing `/ENBL.INT` (pin 14) | Connect/disconnect selected drive's control/status interface; **not** the Sony spindle command |
+| Sony addressed motor command | CA1=1, CA0=0, SEL=0, CA2=0 or 1, strobed by LSTRB | Changes the drive's **/MOTORON** latch |
+| Sony `/MOTORON` readback | RD (pin 16), project `0x4` / ROM `MtrOnAdr=8` | 0 = spindle **commanded on**; 1 = commanded off |
+| Sony `/READY` | RD, project `0xD` / ROM `ReadyAdr=11` | 0 = disk/head/speed (or digital substitutes) ready for data transfer |
+| Sony `/TACH` | RD, project `0x7` / ROM `TachAdr=14` | Time-varying motor tachometer signal; **60 pulses per revolution** |
+
+**[DOC]** `/ENBL.INT=1` forces the original drive's `/MOTORON` latch **high (off)** and RD **high impedance**. A later interface re-enable does not automatically make the spindle on. **[ROM]** The Plus explicitly selects/enables the drive interface in `Sony_DiskSelect`, *then* reads `/MOTORON` and sends the motor command if necessary.
+
+**[DECISION]** The STM32 therefore needs separate variables such as `host_enabled`, `motor_commanded`, `ready` and `tach_phase`, with distinct transition rules. It must not treat `/ENBL` low as “spindle running” or `/MOTORON=0` as automatic proof of readiness.
+
+### 8.2 Motor control: command addresses, readback and shutdown
+
+The command mapping is established in Section 6; repeated here to tie motor control to /READY and TACH:
+
+| Operation | CA1 | CA0 | SEL | CA2 | Project address | ROM address | Effect |
+|---|---:|---:|---:|---:|---|---|---|
+| **MOTOR ON** (LSTRB rising) | 1 | 0 | 0 | 0 | `0x4` | `8` / `MtrOnAdr` | Assert `/MOTORON=0`; spindle commanded on |
+| **MOTOR OFF** (LSTRB rising) | 1 | 0 | 0 | 1 | `0xC` | `9` / `MtrOffAdr` | Release `/MOTORON=1`; spindle commanded off |
+| **Read /MOTORON** (no strobe) | 1 | 0 | 0 | 0 | `0x4` | `8` / `MtrOnAdr` | Selected RD level reports the latch |
+
+**[DOC]** When `/ENBL` is high, `/MOTORON` is preset high. **[ROM]** [`Sony_PowerUp`](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1664-L1682) selects the drive, reads `/MOTORON`, returns without another command if it is already 0, or sends a **single LSTRB pulse at `MtrOnAdr`** otherwise.
+
+**[ROM]** [`Sony_PowerDown`](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1638-L1655) can request immediate motor-off or schedule it using a VBL countdown. Immediate shutdown first strobes `MtrOffAdr` and then accesses IWM `mtrOff` to cut enable. [`Sony_DiskVBLTask`](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1991-L2024) handles deferred shutdown; the VBL task runs at roughly **0.5-second** intervals when appropriate.
+
+**[DECISION]** On motor-off, stop advertising readiness and stop or invalidate the active read-data stream; preserve the virtual track number and mounted-media state. Do **not** flush/write-cancel unpredictably: outstanding buffered flash writes must have an independent safe-persistence policy (Section 11).
+
+### 8.3 Five speed zones: physical 800K mechanism versus electronic model
+
+**[DOC]** The Sony 800K mechanism uses **constant-frequency GCR recording** over five zones of 16 tracks, changing the *physical spindle RPM* with track radius. Apple's 699-0452-A `2.16 (printed sheet 15) gives:
+
+| Zone | Tracks | Original spindle speed | Time per revolution | Sectors/track/side | Target TACH pulse rate | Pulse period |
+|---:|---|---:|---:|---:|---:|---:|
+| 0 | 0–15 | **394 RPM** | ~152.284 ms | 12 | **394 Hz** | ~2538.071 µs |
+| 1 | 16–31 | **429 RPM** | ~139.860 ms | 11 | **429 Hz** | ~2331.002 µs |
+| 2 | 32–47 | **472 RPM** | ~127.119 ms | 10 | **472 Hz** | ~2118.644 µs |
+| 3 | 48–63 | **525 RPM** | ~114.286 ms | 9 | **525 Hz** | ~1904.762 µs |
+| 4 | 64–79 | **590 RPM** | ~101.695 ms | 8 | **590 Hz** | ~1694.915 µs |
+
+Calculations: `revolution_time = 60 / RPM` seconds; `tach_pulses_per_revolution = 60`, so `tach_frequency = RPM` pulses/second and `tach_period = 1 / RPM` seconds.
+
+**[DOC]** Section 2.16 allows **±2.5% speed variation while /READY is low**; the formatting timing figures (`3.4.8) use a tighter **±1.5%** criterion. The tachometer interface (`3.2.4.11, printed sheet 20) specifies **60 pulses/revolution** and **±0.2% period accuracy (STD)**. These refer to *different quantities*; do not interchange the motor's broad speed tolerance with a digital timer's period accuracy.
+
+**[DECISION]** The STM32 needs **no variable-speed physical motor**. It needs an accurate *virtual* speed-zone model, a GCR read-data generator whose track-revolution behaviour is consistent with that model, and a TACH waveform using the corresponding zone rate. Changing the track from 15→16, etc., must update the rate without issuing an unrelated motor-on command.
+
+The relationship among **GCR bit-cell timing**, sector layout, track circumference and virtual phase is reserved for Sections 10 and 12; these derived tach rates do not alone specify the data transition bitstream.
+
+### 8.4 TACH is a selected waveform, not a fixed status bit
+
+**[DOC]** The tachometer is selected on **RD** with:
+
+~~~text
+Project 0x7: CA2=0, CA1=1, CA0=1, SEL=1
+ROM address 14: TachAdr
+/ENBL.INT must be LOW to drive RD.
+~~~
+
+When `/TACH` is selected, RD changes between low and high in a periodic pulse waveform. The original specification gives the count and period accuracy, but **does not in the cited section define a universal high/low duty cycle or the motor-stopped idle level**. **[OPEN]** Those should be verified on actual hardware if tests establish a need for exact fidelity.
+
+**[ROM]** The Plus speed-measurement code polls both levels, requiring **two successive reads low followed by two successive reads high** to accept an edge (see `SONY_WAITTACH`, lines 1948–1988). Thus **a constant level, a narrow pulse invisible to the 68000, or a waveform started only on the instant the host first selects TACH will not reproduce the required normal measurement reliably**.
+
+**[DECISION]** Generate a stable periodic level while the logical spindle is operating; have the RD mux *observe* its current value when project `0x7` is selected. Do not reset the oscillator phase every time CA/SEL chooses TACH. **A 50% duty cycle is a provisional convenient choice**, with sufficiently long low/high intervals for the ROM's consecutive status reads; it is **not documented as a Sony duty-cycle requirement**.
+
+**[DECISION]** Timer generation should continue independently of an occasional SPI flash operation, slow foreground task or GCR buffer preparation. The eventual STM32 implementation should prefer a hardware timer/output-compare or equivalently deterministic peripheral arrangement, not best-effort software toggling.
+
+### 8.5 Critical ROM finding: 800K drives can still be tach-checked
+
+The Macintosh Plus ROM uses TACH in **three related contexts**, and these must be distinguished.
+
+**(a) 400K motor-speed calibration.** [`Sony_MakeSpdTbl`, lines 1778–1849](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1778-L1849) computes legacy PWM speed codes by measuring tachometer periods. **If `NewIntf=1` (800K), the routine skips that calibration**, taking an approximately **800-ms wait** to allow the disk to seat correctly. This is a *host-side* wait and not a reason to simulate motor inertia in the emulator.
+
+**(b) Speed-zone setup.** [`Sony_SetSpeed`, lines 1250–1275](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1250-L1275) forces the legacy PWM speed **code to zero** when the drive is `NewIntf=1`. This does **not** mean the 800K mechanism runs at a fixed RPM. It regulates spindle speed internally, based on the radial zone. Our **pin 20 remains electrically disconnected**; the ROM's PWM buffer logic is not a speed-control connection to our MFD-51W emulator.
+
+**(c) Speed validation during `ReSeek` — important exception.** [`Sony_ReSeek`, lines 832–882](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L832-L882) checks a per-zone `TSTblTicks` timestamp. When the zone has never been checked or the elapsed period exceeds `CkDelta` (normally **four minutes**), it branches to **`SONY_GETFREQ1` to measure TACH**. The test for `NewIntf` appears **later, on the adjustment branch**: an 800K drive cannot have its PWM code adjusted, but the *measurement still occurs*. This is an actual read-path risk if we omit TACH.
+
+The ROM's [`DT_Sony_SpeedCheckTbl`, lines 1766–1776](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1766-L1776) contains target speed limits for each zone (approximately **±2%** around the nominal 394/429/472/525/590 RPM). If the measured speed is outside this range, `ReSeek` can retry and eventually report **`spdAdjErr = −79`**, including on an 800K drive for which it cannot adjust PWM.
+
+**[ROM]** During formatting, [`SONY_SPDSEEK`, lines 2823–2849](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2823-L2849) **does skip** the tach-based format-speed measurement for `NewIntf=1`. The presence of that guard in the formatting path does **not** negate `ReSeek`'s different read-path logic.
+
+**Consequence [DECISION]:** Accurate TACH is a **required** host-visible feature for our baseline Macintosh Plus ROM, not merely a legacy-400K compatibility option. Test initial access to each zone and repeated access after the four-minute recheck interval.
+
+### 8.6 How the Plus ROM measures tachometer speed
+
+**[ROM]** [`Sony_FigTrkSpd` and `SONY_WAITTACH`, lines 1879–1988](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1879-L1988):
+
+1. Address **`TachAdr` (ROM 14 / project `0x7`)** and switch the IWM to status mode (`q6H`, read `q7L`).
+2. Arm the **VIA timer 2**, clocked at approximately **783.36 kHz**, as a timeout.
+3. Synchronise with a complete qualified **TACH low→high** transition.
+4. Re-arm the timer and count **15 further TACH pulses** (one quarter of a 60-pulse revolution).
+5. Determine the elapsed VIA counter ticks. The caller `SONY_GETFREQ1` takes **four such quarter-revolution measurements**, which together represent about one revolution.
+6. Calculate the observed speed and compare it with the applicable zone limits.
+7. When timer 2 expires without enough pulses, the routine returns **`noDriveErr = −64`** as a ROM-side failure, not a Sony-protocol error byte.
+
+The key electrical lesson is that the original ROM **expects a real, regularly toggling status signal** during those measurements. A static `0` or `1` at project `0x7` cannot satisfy the synchronisation and counting loops.
+
+### 8.7 /READY: definition, predicates and transitions
+
+**[DOC]** Sony `3.2.4.12 (printed sheet 20) specifies **`/READY=0`** when a disk is present, the requested head position has settled, and the motor has reached the desired speed. Unlike `/MOTORON`, **/READY is a transfer-permission/status output**, not a simple motor-latch echo.
+
+Read with **project `0xD` / ROM `ReadyAdr=11`**.
+
+For the emulated drive, define:
+
+~~~text
+/READY = 0 only when:
+    cartridge is logically present
+    AND motor is logically commanded on
+    AND current track/head GCR stream can be served correctly
+    AND no conflicting write/media-change transition prevents transfer
+    AND no relevant internal storage/stream fault is pending
+
+otherwise /READY = 1
+~~~
+
+**[DECISION]** This is our **electronic readiness contract**; it replaces the original drive's mechanical head-settle and speed-stabilisation requirements. It is **not** a claim that the Sony mechanism has an SPI flash or buffer predicate.
+
+**[DOC]** Sony `3.4.4, printed sheet 28, shows the motor-on/disk-in/enable timing:
+
+| Original-drive event | Specified bound | Electronic interpretation |
+|---|---|---|
+| Motor-on to /READY assertion (low), with media and other conditions satisfied | **T1 ≤600 ms** | Physical spin-up ceiling, not a mandatory STM32 delay |
+| Disk removed (`/CSTIN` rises) to /READY deassertion (high) | **T2 ≤0.5 µs** | **Fast status invalidation matters**; do not keep reporting ready for absent media |
+| Disk inserted (`/CSTIN` falls) to /READY assertion (low) | **T3 ≤1.0 s** | Physical seating/spin-up ceiling, not a mandatory digital wait |
+| Disable (`/ENBL` rises) to invalid/internal readiness condition | **T4 ≤50 ms to be valid**, as diagram labels it | RD is already **high impedance** when disabled; reset motor state promptly and verify what the source intends by T4 |
+
+**[DOC]** The original format-speed timing (`3.4.8, printed sheets 33–34) allows **≤900 ms** from motor-on to settling within ±1.5% speed and **≤300 ms** from /READY assertion to that tighter speed criterion. Following a zone-changing step, the figure gives **≤200 ms** to the tight speed criterion and **≤50 ms** after /READY assertion. These are **physical-device maximums**; they are *not* instructions to block the STM32 for 900/200 ms.
+
+**[DECISION]** Report ready as soon as the new track's correct timed data stream can be delivered. A preloaded track can become ready almost immediately. If SPI flash access or track preparation is pending, remain **not ready** until the data engine is genuinely prepared. Do not report `/READY=0` while pointing to a stale track, wrong speed-zone configuration, or an incomplete GCR buffer.
+
+### 8.8 ROM motor power-up and READY polling
+
+**[ROM]** [`Sony_PowerUp`, lines 1664–1682](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1664-L1682) works as follows:
+
+1. Select/enable the drive interface through `Sony_DiskSelect`.
+2. Read **`/MOTORON`** at ROM address 8 / project `0x4`.
+3. If readback is already 0, **return without a new motor command**.
+4. Otherwise, pulse LSTRB with `MtrOnAdr` (CA2=0).
+5. For the **new-interface 800K path**, arrange an initial **75-ms** host wait and then enter `SONY_WAITREADY`. The legacy 400K path uses a different fixed-delay strategy.
+
+**[ROM]** [`SONY_WAITREADY`, lines 1466–1485](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1466-L1485) then selects `ReadyAdr` and polls for **/READY=0**, at approximately **1-ms intervals** up to roughly **1 second**. **It continues even if the polling limit expires**; subsequent sector I/O can still fail if the drive is not actually ready.
+
+The **75-ms motor-start wait** and the **800-ms new-interface seat wait** during `Sony_MakeSpdTbl` are **time already spent by the host** in their respective code paths. We should not double them by adding mechanical-delay simulation in the STM32.
+
+**[ROM]** The post-seek use of `SONY_WAITREADY` differs in its initial delay (roughly **500 µs**; Section 7). Both paths read the **same** /READY sense bit; neither requires a separate ready pin.
+
+### 8.9 Automatic insertion spin, disabling, ejection and idle TACH
+
+The original 1986 specification (`3.6, `3.7, printed sheet 36) states that the mechanical drive may **automatically rotate the disk for up to two seconds on insertion** and has power-save exceptions during auto-rotation, ejection, head access and erase.
+
+**Distinguish:**
+
+- **Motor-control latch:** Host-commanded `/MOTORON`; reset to off by `/ENBL` high.
+- **Physical spindle motion:** May briefly exist in the Sony mechanism during automatic seating even without a host motor command.
+- **TACH output:** Reports physical speed when the motor is rotating; in our emulator it is digitally synthesized when needed.
+- **/READY:** Remains a promise of valid transfer conditions, not simply evidence of spindle motion.
+
+**[DECISION]** Our first emulator need not reproduce *automatic physical disk rotation* or spin-down inertia. Logical insertion and data preparation must be implemented, but do not schedule a two-second simulated “motor spin” merely because the original unit performs seating.
+
+**[OPEN]** The manufacturer's cited /TACH description does **not** specify an exact static idle level with motor stopped, nor exactly which insertion-auto-spin states may be visible through its selected RD multiplexor. Use **“no pulses while virtual spindle stopped; idle level provisionally high”** as a testable implementation hypothesis, **not a verified Sony electrical behaviour**.
+
+**[DOC]** The original drive is designed to finish an already-triggered **eject** even after /ENBL goes high. That does not mean the motor-control latch should remain on. Eject logical state and media-present transitions belong in Section 9.
+
+### 8.10 Proposed STM32 timing/ready architecture
+
+**[DECISION]** Use a **common virtual speed-zone state** shared by the TACH source and GCR data engine:
+
+~~~text
+State:
+    host_enabled                  # /ENBL.INT pin 14; interface gating
+    motor_commanded               # /MOTORON latch
+    track                          # 0..79, from Section 7
+    speed_zone = track / 16        # integer
+    tach_period                   # zone rate from table in `8.3`
+    tach_phase                    # continuously evolving while virtual motor runs
+    media_present                 # mounted cartridge state
+    track_stream_ready            # current track/head data prepared
+    media_transition_or_fault
+    write_transition_active
+
+On qualified MOTOR-ON command (Section 6):
+    motor_commanded = true
+    enable_virtual_tach_if_applicable()
+    make_current_track_stream_active_when_prepared()
+
+On qualified MOTOR-OFF command or /ENBL disabled:
+    motor_commanded = false
+    stop_virtual_spindle_tach()
+    invalidate_data_transfer_readiness()
+    preserve_track_and_media_state()
+
+On accepted STEP (Section 7):
+    new_zone = track / 16
+    if zone changed:
+        install new timer period and GCR zone parameters coherently
+    invalidate stale stream; select/preload new track
+    /READY = 1 until correct stream is available
+    # /STEP may return high independently of this
+
+Compute ready:
+    ready = motor_commanded AND media_present
+            AND track_stream_ready AND NOT media_transition_or_fault
+            AND NOT write_transition_active_if_it_blocks_transfers
+
+RD multiplexer when /ENBL is LOW:
+    if project selector == 0x4: RD = motor_commanded ? 0 : 1
+    if project selector == 0x7: RD = current_tach_phase_level
+    if project selector == 0xD: RD = ready ? 0 : 1
+    # other selectors per Section 4
+
+RD while /ENBL is HIGH: HIGH-IMPEDANCE, regardless of these states.
+~~~
+
+**Implementation notes:**
+
+- Prefer an **STM32 hardware timer** (or equally deterministic hardware output) for `/TACH`; choose prescaler/ARR values whose rounding error remains comfortably within the desired tach accuracy across all five rates.
+- **Keep tach phase independent of which status is currently selected.** Selecting TACH should reveal the oscillator state, not restart it or synthesize an artificial pulse.
+- For zone transitions, install a new frequency at a controlled timer boundary or intentionally reset a virtual revolution phase under a defined rule. Ensure new-zone TACH and GCR generation are coherent *before* signalling ready. The original mechanical phase is not required, but the output should be internally consistent.
+- RD is a **shared high-speed physical output**. The selector and enable circuitry must arbitrate correctly between static status, TACH toggles and GCR transitions, with the `≤0.5 µs` status-change/output-disable figures to be validated in Section 14.
+- Keep /READY derivation synchronized with any flash/media buffering operation, but do not block low-latency status or TACH generation on SPI flash commands.
+- An **MCU clock/power brownout** must tri-state RD safely and must not cause the Macintosh to see a falsely ready or phantom-motor-on drive.
+
+This is the **functional architecture**. No STM32 part number, clock tree, DMA channel, GPIO pin assignment or hardware flip-flop/buffer scheme is approved yet.
+
+### 8.11 Verification matrix and unresolved details
+
+| Test or observation | Expected result | Evidence |
+|---|---|---|
+| Drive disabled (`/ENBL=1`) | RD high impedance; `/MOTORON` resets off | [DOC] |
+| Enable drive but do not issue MOTOR ON | Motor-status readback off; /READY not asserted merely by enable | [DOC]/[DECISION] |
+| Strobe MOTOR ON (`0x4`) | `/MOTORON=0`; virtual tach starts; /READY asserts only when real data conditions hold | [DOC]/[DECISION] |
+| Strobe MOTOR OFF (`0xC`) | `/MOTORON=1`; transfer readiness ends | [DOC]/[DECISION] |
+| No cartridge but motor commanded on | `/CSTIN=1`, `/READY=1`; exact no-media TACH behaviour [OPEN] | [DOC]/[OPEN] |
+| Valid cartridge, motor on, stream ready | `/READY=0`, matching the ROM's status sense | [DOC]/[ROM] |
+| Cartridge removed while ready | `/READY` quickly becomes 1; no stale bitstream is offered | [DOC]/[DECISION] |
+| TACH selected at track 0 | Period ~2538.071 µs (394 Hz); alternating sense samples | [DOC]/[ROM] |
+| TACH selected at track 79 | Period ~1694.915 µs (590 Hz); alternating sense samples | [DOC]/[ROM] |
+| Cross each of four zone boundaries | TACH frequency changes to the new zone's exact nominal rate | [DOC]/[DECISION] |
+| Read while `ReSeek` checks a zone initially or after ~4 minutes | VIA timer sees 15 edges per quarter revolution; ROM speed check succeeds | [ROM] |
+| 800K `MakeSpdTbl` called | ROM takes its 800-ms seating wait; no 400K PWM calibration demanded | [ROM] |
+| 800K `SpdSeek` during format | ROM skips legacy format speed calibration; data-path timing still correct | [ROM] |
+| Stop/restart motor; switch TACH selector repeatedly | No fake pulses due solely to selector switching; no mechanical wait | [DECISION] |
+| SPI flash busy while motor logically running | Hardware-timed TACH unaffected; READY may deassert if stream unavailable | [DECISION] |
+| Invalid idle TACH or missing pulses (negative test) | ROM can timeout with `noDriveErr`; subsequent read error recovery may follow | [ROM] |
+
+**Open questions:**
+
+1. Determine original **/TACH stopped-state level**, pulse duty and whether an auto-insertion spin can be observed at RD in the common MFD-51W/-03 internal configuration.
+2. Measure full **motor-off-to-/READY-high** electrical latency and interpretation of `3.4.4 T4, particularly when /ENBL is disabling RD at the same time.
+3. Determine how GCR streaming resumes on power-up and after a zone change without breaking the ROM's 15-pulse/quarter-revolution speed measurements.
+4. Verify whether the Plus or third-party software tests the *temporal* sequence of motor-on and /READY even when the virtual track is immediately prepared.
+5. Validate the timer's effective edge-period error/jitter under full SPI flash activity, GCR bitstream generation, selector changes and interrupt load.
+6. Resolve exact behaviour for **read during disk insertion**, **motor-on with no cartridge**, **eject in progress**, and flash commit during power-down in Sections 9, 11 and 13.
+7. Reconcile readiness and tach performance against a real MFD-51W or MFD-51W-03 once hardware is available; preserve **pins 9 and 20 NC** throughout.
 
 ## 9. Operation: disk insertion, protection and eject
 
@@ -786,6 +1058,7 @@ On normal drive disable (/ENBL rising):
 
 ### Change history
 
+- **2026-11-06 (Section 8):** Added motor-control versus IWM drive-enable distinction, five authentic RPM zones and derived 60-pulse/revolution TACH rates, the ROM's **unexpected 800K ReSeek tach-speed validation**, /READY conditions and timing diagrams, automatic-insertion caveats, and STM32 timer/ready state model with validation tests. No physical spin-up or seek delays added as requirements.
 - **2026-11-06 (Section 7):** Expanded the ROM-driven one-track seek and recalibration operations, /STEP acknowledgement versus /READY, /TK0 status, original step/access timing diagrams and limits, 80-track geometry, immediate virtual stepping, STM32 state model and validation matrix. Documented hardware-only physical timing as *limits*, not required artificial delays.
 - **2026-11-06 (Section 6):** Added the eight-pattern /DIRTN, /STEP, /MOTORON and EJECT command table, LSTRB rising-edge protocol, both 1985/1986 timing references (including an explicit T4/T5 discrepancy), actual Plus ROM issue sequences, short 800K eject handling, and an STM32 command decoder/test model. Sections 5 and 7–16 remain for later analysis.
 - **2026-11-06:** Created Document 06: operation-first contents and a detailed, source-referenced **status-read** section. Correctly distinguished ROM address notation from project notation, identified ROM startup probes, and left unverified/read-unassigned outputs explicitly open. All subsequent operations remain scaffolded.
