@@ -1179,7 +1179,7 @@ Unlike magnetic media, an SPI flash cartridge may be vulnerable to power/contact
 **[DESIGN REQUIREMENT / OPEN IMPLEMENTATION]** Establish clear durability semantics before promising a functional eject:
 
 - **Completed writes must not be silently lost** when the Macintosh receives a successful logical eject. Any buffering or flash journal must be committed/recoverable beforehand.
-- Prevent **new writes** once software eject has been accepted for that cartridge; settle or reject in-flight transfers according to Section 11's eventual write-operation contract.
+- Prevent **new writes** once software eject has been accepted for that cartridge; settle or reject in-flight transfers according to the future **Section 12** write-operation contract (shared persistence principles in Section 11).
 - Never continue issuing SPI flash erase/program commands to contacts known to be open or unstable.
 - On unexpected withdrawal: **immediately mark media not ready**, remove `/CSTIN` after qualified removal, stop disk-stream access, and protect later cartridge insertions from stale buffers belonging to the earlier cartridge.
 - Power-fail detection, emergency energy storage, atomic page/sector mapping, verification, journaling and media generation numbers are possible approaches, **not approved designs**.
@@ -1312,7 +1312,7 @@ The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: t
 8. Verify that the physical design's *partial-eject position* does not accidentally requalify the same cartridge while still electrically connected.
 9. Keep software eject on the common LSTRB command interface with **pins 9 and 20 left unconnected**, independent of the chosen cable revision.
 
-**Related future sections:** Section 10 (GCR reads and blank/unformatted media), Section 11 (write gating, buffering, persistence), Section 13 (power-fail/media faults), Section 14 (electrical response timing), Section 15 (STM32 state and peripherals).
+**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), future Section 12 (write gating, capture, persistence), Section 14 (power-fail/media faults), Section 15 (electrical response timing), and Section 16 (STM32 state and peripherals).
 
 ## Continuation and future parts
 
