@@ -7,7 +7,7 @@
 **Implementation platform:** STM32 preferred; exact MCU, electrical buffers and timing architecture not yet chosen  
 **Last updated:** 9 November 2026
 
-> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2](06-part-2-serial-gcr-read.md)** develops **Section 10 (serial GCR read)**. **Part 3 / Section 11 (serial write)** is reserved for future work; Sections 12–17 retain their numbers in the roadmap below. No hardware or firmware implementation choice has been added merely by splitting the files.
+> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates raw-GCR cartridge architecture, global SYNC6 calibration, logical track metadata and TACH. **Part 4 / Section 12** is reserved for serial writing; future sections become **13–18**. These numbers do not imply approval of outstanding implementation details.
 >
 > **Purpose:** Specify the *host-visible operations* of the Sony drive, not only its pinout. Check required operations against the Macintosh Plus ROM `.Sony` driver. A scaffold heading is a research plan, not an approved firmware requirement.
 >
@@ -74,8 +74,9 @@
    - [9.10 STM32 lifecycle model](#910-preliminary-mediaeject-state-machine-and-outputs)
    - [9.11 Verification and decisions](#911-verification-matrix-and-open-decisions)
 10. **[Serial GCR disk-data reading — Part 2](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading)** — developed in a separate document.
-11. **Serial write-data capture — Part 3 (planned)** — not created yet.
-12–17. **[Future sections — roadmap](#continuation-and-future-parts)** — keep original numbering as the protocol develops.
+11. **[Shared media architecture — Part 3](06-part-3-media-architecture.md#11-shared-raw-gcr-media-timing-and-cartridge-architecture)** — developed.
+12. **Serial write-data capture — Part 4 (planned)** — not created yet.
+13–18. **[Future sections — roadmap](#continuation-and-future-parts)** — updated numbering.
 
 - [Continuation and future parts](#continuation-and-future-parts)
 - [Decisions and change history](#decisions-and-change-history)
@@ -461,7 +462,7 @@ At any time when /ENBL is LOW:
     # Status/data mux is separate from the LSTRB command decoder.
 ~~~
 
-**Architecture caution:** ROM pulses are microseconds long. The final STM32 implementation must capture **LSTRB edges** and handle RD/status changes deterministically; a slow, occasionally scheduled polling loop is not an approved implementation. Timer/input-capture, external logic or interrupt-assisted buffering are candidates for Section 15.
+**Architecture caution:** ROM pulses are microseconds long. The final STM32 implementation must capture **LSTRB edges** and handle RD/status changes deterministically; a slow, occasionally scheduled polling loop is not an approved implementation. Timer/input-capture, external logic or interrupt-assisted buffering are candidates for Section 16.
 
 ### 6.9 Tests, boundaries and open verification
 
@@ -707,7 +708,7 @@ On normal drive disable (/ENBL rising):
 
 **Technical refinement:** The status mux reads shared state that changes in the command decoder. The actual STM32 design must publish a **coherent track/status/data-stream state**, avoiding an instant when `/TK0` reflects a new track but a stale track's GCR bitstream is still emitted. A track-cache switch may occur immediately if the required data is resident in memory; otherwise set `/READY` to not-ready until it is prepared. We need no artificial motion timer.
 
-**Out-of-range and unexpected-input policy remains provisional:** Clamp at 0/79 for safety; do not interpret head/side changes as track steps; do not advance during a disallowed write/transition. The exact behaviour after a step request during `/WRREQ` asserted, rapid re-strobe, cartridge removal and simultaneous state transitions needs test coverage and Section 11 integration.
+**Out-of-range and unexpected-input policy remains provisional:** Clamp at 0/79 for safety; do not interpret head/side changes as track steps; do not advance during a disallowed write/transition. The exact behaviour after a step request during `/WRREQ` asserted, rapid re-strobe, cartridge removal and simultaneous state transitions needs test coverage and Section 12 write-path integration.
 
 ### 7.10 Verification matrix and remaining questions
 
@@ -739,7 +740,7 @@ On normal drive disable (/ENBL rising):
 6. Establish timer/capture and RD-status publication latency under worst-case STM32 GCR generation and SPI flash activity.
 7. Recheck any detailed differences for MFD-51W versus MFD-51W-03 using real hardware, while retaining the shared 20-pin profile with **pins 9 and 20 NC**.
 
-**Next related operations:** Section 8 will specify motor control, ready and tachometer in depth; Section 10 covers the track/head bitstream and the data-engine readiness handoff; Section 11 will resolve seek/write exclusion.
+**Related operations:** Section 8 specifies motor, ready and tachometer; Section 10 covers the read stream; [Section 11](06-part-3-media-architecture.md) consolidates shared media/timing decisions; future **Section 12** resolves seek/write exclusion and WR timing.
 
 ## 8. Operation: motor, ready handshake and tachometer
 
@@ -777,7 +778,7 @@ The command mapping is established in Section 6; repeated here to tie motor cont
 
 **[ROM]** [`Sony_PowerDown`](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1638-L1655) can request immediate motor-off or schedule it using a VBL countdown. Immediate shutdown first strobes `MtrOffAdr` and then accesses IWM `mtrOff` to cut enable. [`Sony_DiskVBLTask`](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1991-L2024) handles deferred shutdown; the VBL task runs at roughly **0.5-second** intervals when appropriate.
 
-**[DECISION]** On motor-off, stop advertising readiness and stop or invalidate the active read-data stream; preserve the virtual track number and mounted-media state. Do **not** flush/write-cancel unpredictably: outstanding buffered flash writes must have an independent safe-persistence policy (Section 11).
+**[DECISION]** On motor-off, stop advertising readiness and stop or invalidate the active read-data stream; preserve the virtual track number and mounted-media state. Do **not** flush/write-cancel unpredictably: outstanding buffered flash writes must have an independent safe-persistence policy (shared principles in Section 11; write details in Section 12).
 
 ### 8.3 Five speed zones: physical 800K mechanism versus electronic model
 
@@ -795,9 +796,9 @@ Calculations: `revolution_time = 60 / RPM` seconds; `tach_pulses_per_revolution 
 
 **[DOC]** Section 2.16 allows **±2.5% speed variation while /READY is low**; the formatting timing figures (`3.4.8) use a tighter **±1.5%** criterion. The tachometer interface (`3.2.4.11, printed sheet 20) specifies **60 pulses/revolution** and **±0.2% period accuracy (STD)**. These refer to *different quantities*; do not interchange the motor's broad speed tolerance with a digital timer's period accuracy.
 
-**[DECISION]** The STM32 needs **no variable-speed physical motor**. It needs an accurate *virtual* speed-zone model, a GCR read-data generator whose track-revolution behaviour is consistent with that model, and a TACH waveform using the corresponding zone rate. Changing the track from 15→16, etc., must update the rate without issuing an unrelated motor-on command.
+**[DECISION — logical track model]** No physical motor or per-zone GCR timing model is implemented. The STM32 uses **one global GCR bit-cell calibration** and logical **track descriptors** (sector count, valid bit length, data offset). The selected standard track's **sector count** determines the host-visible TACH frequency through a compatibility lookup, not through a motor simulation. GCR output stays at the same calibrated rate for every track. When changing tracks, update the stream and TACH coherently before asserting ready.
 
-The relationship among **GCR bit-cell timing**, sector layout, track circumference and virtual phase is reserved for Sections 10 and 12; these derived tach rates do not alone specify the data transition bitstream.
+See [Part 2 / Section 10](06-part-2-serial-gcr-read.md) for bitstream details and [Part 3 / Section 11](06-part-3-media-architecture.md) for the agreed media/timing contract. Track bit length alone does **not** guarantee the frequency expected for TACH.
 
 ### 8.4 TACH is a selected waveform, not a fixed status bit
 
@@ -916,18 +917,21 @@ The original 1986 specification (`3.6, `3.7, printed sheet 36) states that the m
 
 ### 8.10 Proposed STM32 timing/ready architecture
 
-**[DECISION]** Use a **common virtual speed-zone state** shared by the TACH source and GCR data engine:
+**[DECISION]** Use logical track/side metadata and a **single global GCR cell timing reference**. The TACH timer selects its host-compatible frequency from the standard track's **sector count** (Part 3 / Section 11), independent of the data-cell clock:
 
 ~~~text
 State:
     host_enabled                  # /ENBL.INT pin 14; interface gating
     motor_commanded               # /MOTORON latch
     track                          # 0..79, from Section 7
-    speed_zone = track / 16        # integer
-    tach_period                   # zone rate from table in `8.3`
-    tach_phase                    # continuously evolving while virtual motor runs
-    media_present                 # mounted cartridge state
-    track_stream_ready            # current track/head data prepared
+    selected_side
+    sector_count                   # selected logical track metadata
+    valid_track_bits               # explicit cyclic bit length
+    global_bit_cell_period         # one stored calibration for cartridge
+    tach_period                    # lookup(sector_count), NOT per-zone GCR timing
+    tach_phase                     # independent oscillator phase
+    media_present
+    track_stream_ready
     media_transition_or_fault
     write_transition_active
 
@@ -938,17 +942,16 @@ On qualified MOTOR-ON command (Section 6):
 
 On qualified MOTOR-OFF command or /ENBL disabled:
     motor_commanded = false
-    stop_virtual_spindle_tach()
+    stop_virtual_tach()
     invalidate_data_transfer_readiness()
     preserve_track_and_media_state()
 
 On accepted STEP (Section 7):
-    new_zone = track / 16
-    if zone changed:
-        install new timer period and GCR zone parameters coherently
-    invalidate stale stream; select/preload new track
+    invalidate stale stream
+    load new track/side metadata + raw bitstream
+    install TACH frequency from sector_count
+    keep the same global GCR bit-cell period
     /READY = 1 until correct stream is available
-    # /STEP may return high independently of this
 
 Compute ready:
     ready = motor_commanded AND media_present
@@ -961,15 +964,15 @@ RD multiplexer when /ENBL is LOW:
     if project selector == 0xD: RD = ready ? 0 : 1
     # other selectors per Section 4
 
-RD while /ENBL is HIGH: HIGH-IMPEDANCE, regardless of these states.
+RD while /ENBL is HIGH: HIGH-IMPEDANCE.
 ~~~
 
 **Implementation notes:**
 
 - Prefer an **STM32 hardware timer** (or equally deterministic hardware output) for `/TACH`; choose prescaler/ARR values whose rounding error remains comfortably within the desired tach accuracy across all five rates.
 - **Keep tach phase independent of which status is currently selected.** Selecting TACH should reveal the oscillator state, not restart it or synthesize an artificial pulse.
-- For zone transitions, install a new frequency at a controlled timer boundary or intentionally reset a virtual revolution phase under a defined rule. Ensure new-zone TACH and GCR generation are coherent *before* signalling ready. The original mechanical phase is not required, but the output should be internally consistent.
-- RD is a **shared high-speed physical output**. The selector and enable circuitry must arbitrate correctly between static status, TACH toggles and GCR transitions, with the `≤0.5 µs` status-change/output-disable figures to be validated in Section 14.
+- On a track change, install the sector-count-derived TACH frequency at a controlled timer boundary, load the new bitstream length and retain the same global GCR bit-cell rate. Maintain reasonable coherence between the TACH status and track duration before signalling ready.
+- RD is a **shared high-speed physical output**. The selector and enable circuitry must arbitrate correctly between static status, TACH toggles and GCR transitions, with the `≤0.5 µs` status-change/output-disable figures to be validated in Section 15.
 - Keep /READY derivation synchronized with any flash/media buffering operation, but do not block low-latency status or TACH generation on SPI flash commands.
 - An **MCU clock/power brownout** must tri-state RD safely and must not cause the Macintosh to see a falsely ready or phantom-motor-on drive.
 
@@ -1003,7 +1006,7 @@ This is the **functional architecture**. No STM32 part number, clock tree, DMA c
 3. Determine how GCR streaming resumes on power-up and after a zone change without breaking the ROM's 15-pulse/quarter-revolution speed measurements.
 4. Verify whether the Plus or third-party software tests the *temporal* sequence of motor-on and /READY even when the virtual track is immediately prepared.
 5. Validate the timer's effective edge-period error/jitter under full SPI flash activity, GCR bitstream generation, selector changes and interrupt load.
-6. Resolve exact behaviour for **read during disk insertion**, **motor-on with no cartridge**, **eject in progress**, and flash commit during power-down in Sections 9, 11 and 13.
+6. Resolve exact behaviour for **read during disk insertion**, **motor-on with no cartridge**, **eject in progress**, and flash commit during power-down in Sections 9, 12 and 14.
 7. Reconcile readiness and tach performance against a real MFD-51W or MFD-51W-03 once hardware is available; preserve **pins 9 and 20 NC** throughout.
 
 ## 9. Operation: disk insertion, protection and eject
@@ -1025,7 +1028,7 @@ There are **no separate disk-present, write-protect, or eject-complete pins** on
 | Read eject latch/operation | RD via CA0/CA1/CA2/SEL | `0x6` | `12 / EjectLAdr` | EJECT readback exists in Sony table; exact original-Plus usage remains **[OPEN]** |
 | **Command software eject** | LSTRB rising with CA1=1, CA0=1, SEL=0, CA2=1 | `0xE` | `13 / EjectHAdr` | Begin eject operation; **not pin 9** |
 | Host drive selection | `/ENBL.INT`, pin 14 | — | IWM `intDrive` + `mtrOn` | Must be active for status access and command |
-| Write-data acceptance | `/WRREQ`, WR, enable and media protection | — | IWM write path | Only accept changes to permitted media; Section 11 |
+| Write-data acceptance | `/WRREQ`, WR, enable and media protection | — | IWM write path | Media principles Section 11; detailed write path Section 12 |
 
 **[DECISION]** Emulator connector **pins 9 and 20 are NC**. The revision-specific hardware eject input on certain Sony drives is not used. **Software eject through the regular addressed command is mandatory**.
 
@@ -1152,7 +1155,7 @@ Distinguish **a blank, format-capable medium** from **unreadable/failed flash**:
 - A *failed/unqualified* cartridge should not be advertised as a newly readable disk. Whether to keep it logically absent or present-but-not-ready after a fault is an **[OPEN]** error-policy choice that must be made deterministically.
 - A *write-protected* cartridge is still a valid readable disk; its `/WRTPRT=0` response is not a failure.
 
-**[OPEN]** Media ID generation, flash layout and fault metadata should not be invented here. Define them in the media-format/flash documentation once storage architecture is selected.
+**[DECISION]** Shared raw-GCR, global calibration and logical-track metadata are consolidated in [Part 3 / Section 11](06-part-3-media-architecture.md). The exact on-flash binary format, allocation and fault metadata remain **[OPEN]**.
 
 ### 9.8 Write-protect sources, caching and enforcement
 
@@ -1167,7 +1170,7 @@ Possible causes of a non-writable cartridge include a deliberate write-protect s
 - A change from protected to writable should not silently override an OS-cached read-only decision. A **logical eject and fresh insertion** is the conservative way to reannounce a changed policy.
 - Some write-protect transitions may be implemented purely in cartridge firmware metadata and may not correspond to a mechanical floppy tab. That is permitted provided host behaviour is correct.
 
-**[DOC]** Apple `3.2.5 specifies recording only when **/WRTGATE=0**, **/ENBL=0** and media **not write-protected**. Section 11 must specify how the Macintosh Plus's `/WRREQ` maps to Sony's gate and how invalid writes are rejected/ignored without ever corrupting flash.
+**[DOC]** Apple `3.2.5 specifies recording only when **/WRTGATE=0**, **/ENBL=0** and media **not write-protected**. Section 12 must specify how the Macintosh Plus's `/WRREQ` maps to Sony's gate and how invalid writes are rejected/ignored without ever corrupting flash.
 
 ### 9.9 Abrupt removal, power interruption and safe flash writes
 
@@ -1313,65 +1316,47 @@ The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: t
 
 ## Continuation and future parts
 
-The historical main document originally carried **Sections 10–17 as brief scaffolds**. To keep numbering stable while splitting timing-critical operations into separate files, the remaining work is tracked here without presenting empty top-level numbered sections.
+This continuous protocol is split by responsibility. **Part 3 / Section 11** is inserted between the existing **Part 2 / Section 10** reading procedure and the now-planned **Part 4 / Section 12** writing procedure. Previously planned Sections 12–17 shift to **13–18**.
 
-- **[Section 10 — Serial GCR disk-data reading](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading):** **06 — Part 2**, developed.
-- **Section 11 — Serial write-data capture:** **06 — Part 3**, *planned and not created*. This will be the next timing-critical research document.
-- **Sections 12–16:** Future protocol/validation work, assignments to further files not yet agreed.
-- **Section 17 — Open questions and decision log:** Retain the number in the overall protocol plan; current Part 1 historical notes are preserved immediately below.
+- **[Section 10 — Serial GCR reading (Part 2)](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading):** detailed read path and freshly formatted stream.
+- **[Section 11 — Shared media, calibration and cartridge architecture (Part 3)](06-part-3-media-architecture.md#11-shared-raw-gcr-media-timing-and-cartridge-architecture):** current, agreed principles and open implementation questions.
+- **Section 12 — Serial GCR writing (Part 4):** planned and not yet created.
+- **Sections 13–17:** additional protocol, electrical, implementation and verification work.
+- **Section 18:** future consolidated decision log; historical notes retained in the appendix.
 
-### Preserved research scaffolds for Sections 11–16
+### Preserved research scaffolds for planned Sections 12–17
 
-### Planned Section 11: Operation: serial write-data capture
+### Planned Section 12: Operation: serial write-data capture
 
-**TO DEVELOP.** Specify WR (pin 18), /WRREQ (pin 10), valid write gating, IWM write/handshake modes, input-capture timing, serial GCR representation, buffering, flash commit, and write-protection enforcement. Inspect ROM write/format and handshake paths.
+**TO DEVELOP.** WR (pin 18), /WRREQ (pin 10), valid write gating, IWM write/handshake modes, input-capture timing, captured raw bits, track position/splice, buffering, flash commit, write-protection and format distinction. Inspect ROM write/format paths. Respect [Part 3](06-part-3-media-architecture.md) decisions.
 
+### Planned Section 13: Operation: format, sector geometry, sides and 400K compatibility
 
+**TO DEVELOP.** ROM `Sony_CtlFormat`, `SONY_DOFORMAT`, `SONY_FILLINMARKS`. Standard formatted track sector counts 12/11/10/9/8 across 80 radial tracks; head selection, interleave, checksums, format bytes, 400K compatibility, standard-track generation and fit/seam constraints. The STM32 uses **logical sector counts/bit lengths**, not a physical spindle model.
 
-### Planned Section 12: Operation: format, speed zones, sides and 400K compatibility
+### Planned Section 14: Operation: error handling and unusual sequences
 
-**TO DEVELOP.** ROM: `Sony_CtlFormat`, `Sony_DoFormat`, `Sony_FillInMarks` and GCR field routines. Document 80 tracks, zone-dependent sectors per track (12/11/10/9/8), both sides, format bytes, interleave, checksums, formatting and 400K disk-image compatibility. Distinguish a **400K-formatted disk** from emulating an original **400K-only drive**.
+**TO DEVELOP.** No disk, bad data, repeated step, out-of-range track, not-ready timeout, eject/write collision, unexpected removal, underrun, power loss and recovery.
 
+### Planned Section 15: Electrical requirements and timing
 
+**TO DEVELOP.** Pin voltage thresholds, RD tri-state/output buffer, host load, command and status response limits, GCR transition width/spacing, 5 V ↔ STM32 interfacing, power and pin 9/20 isolation. Link to [Document 02](02-macintosh-20-pin-interface.md).
 
-### Planned Section 13: Operation: error handling and unusual sequences
+### Planned Section 16: STM32 implementation architecture
 
-**TO DEVELOP.** No disk, read/write failure, repeated step, out-of-range tracks, not-ready timeouts, eject during write, cartridge removal, write underrun, brownout/power loss, and recovery from unexpected host strobes.
+**TO DEVELOP.** Selector logic, LSTRB capture, RD mux, GCR timer/DMA, WR transition capture, shared track position, global calibration, removable SPI flash cache/persistence, timing priorities and jitter. No specific STM32 device approved yet.
 
+### Planned Section 17: Validation and acceptance tests
 
+**TO DEVELOP.** ROM probing/status and commands, TACH verification during ordinary 800K reads, five standard sector-count classes, SYNC6 calibration, full GCR read/write/format, boot, electrical jitter, media eject/removal and flash durability.
 
-### Planned Section 14: Electrical requirements and timing
+### Planned Section 18: Open questions and decision log
 
-**TO DEVELOP.** Pin voltage thresholds, RD output buffers and high impedance, host input loading, status setup/hold/response limits, GCR pulse timing, 5 V to STM32 interfacing, power budget, fail-safe boot, cable continuity and pin-9/20 isolation. Link detailed connector/power tables to [Document 02](02-macintosh-20-pin-interface.md).
-
-
-
-### Planned Section 15: STM32 implementation architecture
-
-**TO DEVELOP.** Selector decoder, LSTRB edge capture, status multiplexer, tri-state RD driver, timer/DMA GCR generation, capture of WR transitions, SPI flash cartridge buffering, interrupt priority, timing/jitter verification. STM32 is the selected *platform direction*, not yet a specific part number.
-
-
-
-### Planned Section 16: Validation and acceptance tests
-
-**TO DEVELOP.** Build an evidence-backed checklist and test matrix covering:
-
-- Drive enabled/disabled and RD high impedance.
-- ROM startup probing (`0xE=0`, `0xC=1`, `0xF=1`).
-- Address/ROM encoding conversion and all 16 selector combinations.
-- CSTIN, WRTPRT, TK0, STEP, MOTORON, READY, eject transitions.
-- Commands, seek and recalibration.
-- Both heads, 400K/800K GCR read/write/format and boot.
-- Electrical latency, no-disk state, power loss, cartridge removal.
-- ROM trace and comparison to a physical Sony drive when available.
-
-### Planned Section 17: Open questions and decision log
-
-Decision/open-question consolidation is still planned; the original baseline notes and change history are retained in the appendix.
+Future cross-part decision-log consolidation. Current Part 1 research notes remain in the unnumbered appendix below.
 
 ## Decisions and change history
 
-*This unnumbered appendix preserves the earlier Section 17 notes pending their eventual allocation to a future part.*
+*This unnumbered appendix preserves historical Section 17 notes pending their eventual allocation to Section 18.*
 
 ### Agreed
 
@@ -1392,11 +1377,12 @@ Decision/open-question consolidation is still planned; the original baseline not
 
 ### Change history
 
+- **2026-11-09 (new Part 3):** Added [Part 3 / Section 11](06-part-3-media-architecture.md) for the common raw-GCR, SYNC6 timing, logical-track, metadata and TACH contract. Shifted serial writing to Part 4 / Section 12, and deferred headings to 13–18. Removed physical-zone implementation language from the STM32 state model without removing host-visible TACH requirements.
 - **2026-11-09 (Section 9):** Developed Macintosh Plus disk-insertion, ROM VBL polling and first-access state; corrected the empty-drive `/WRTPRT=0` semantics and documented Sony's special empty-but-injected `/CSTIN` case; specified software eject timing, ROM post-eject suppression, logically ejected/physically retained cartridge state, qualification, write protection, flash-durability constraints and tests. Section 9 remains open for mechanical and storage-design implementation decisions.
 - **2026-11-06 (Section 8):** Added motor-control versus IWM drive-enable distinction, five authentic RPM zones and derived 60-pulse/revolution TACH rates, the ROM's **unexpected 800K ReSeek tach-speed validation**, /READY conditions and timing diagrams, automatic-insertion caveats, and STM32 timer/ready state model with validation tests. No physical spin-up or seek delays added as requirements.
 - **2026-11-06 (Section 7):** Expanded the ROM-driven one-track seek and recalibration operations, /STEP acknowledgement versus /READY, /TK0 status, original step/access timing diagrams and limits, 80-track geometry, immediate virtual stepping, STM32 state model and validation matrix. Documented hardware-only physical timing as *limits*, not required artificial delays.
-- **2026-11-06 (Section 6):** Added the eight-pattern /DIRTN, /STEP, /MOTORON and EJECT command table, LSTRB rising-edge protocol, both 1985/1986 timing references (including an explicit T4/T5 discrepancy), actual Plus ROM issue sequences, short 800K eject handling, and an STM32 command decoder/test model. Sections 5 and 7–16 remain for later analysis.
+- **2026-11-06 (Section 6):** Added the eight-pattern /DIRTN, /STEP, /MOTORON and EJECT command table, LSTRB rising-edge protocol, both 1985/1986 timing references (including an explicit T4/T5 discrepancy), actual Plus ROM issue sequences, short 800K eject handling, and an STM32 command decoder/test model. Sections 5 and 7–16 remained for analysis at the time of this historical note.
 - **2026-11-06:** Created Document 06: operation-first contents and a detailed, source-referenced **status-read** section. Correctly distinguished ROM address notation from project notation, identified ROM startup probes, and left unverified/read-unassigned outputs explicitly open. All subsequent operations remain scaffolded.
 
 
-- **2026-11-09 (document split):** Renamed original Document 06 to **06 — Part 1**, retaining full Sections **1–9**, moving detailed Section **10** to [06 — Part 2](06-part-2-serial-gcr-read.md), and assigning Section **11** to future **06 — Part 3**. Kept earlier Sections 11–17 as a deferred roadmap without changing their numbers.
+- **2026-11-09 (document split):** Renamed original Document 06 to **06 — Part 1**, retaining full Sections **1–9**, moving detailed Section **10** to [06 — Part 2](06-part-2-serial-gcr-read.md), and assigning Section **11** to future **06 — Part 3**. Kept earlier Sections 11–17 as a deferred roadmap at the time (subsequently renumbered when Part 3 was inserted).
