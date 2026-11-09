@@ -8,7 +8,7 @@
 **Preferred implementation:** STM32 (specific part/peripherals not yet selected)  
 **Date:** 9 November 2026
 
-> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. Structured-GCR sector records plus raw-track compatibility, SYNC6 calibration, logical track metadata and TACH are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is in **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; format geometry, standard reconstruction and 400K compatibility are in **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)**. Later sections are **14–18**.
+> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. Structured-GCR sector records plus raw-track compatibility, SYNC6 calibration, logical track metadata and TACH are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is in **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; format geometry, standard reconstruction and 400K compatibility are in **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)**. [Part 6 / Section 14](06-part-6-error-handling-standard-media.md) limits initial supported media and defines fault handling; later sections are **15–18**.
 >
 > **Design rule:** Emulate the *electrical and logical* read interface, **not** spinning hardware, sounds, seek time or motor inertia. Yet the IWM still expects correctly timed **serial pulse patterns** and recognizes recorded fields as they arrive. Do not mistake “no mechanical rotational latency” for permission to output whole bytes instantly or substitute a static status value for disk data.
 
@@ -121,7 +121,7 @@ FF 3F CF F3 FC FF      (special overlapping self-sync pattern)
 
 The bytes are **not six ordinary independently aligned `$FF` nibbles**: the concatenated bitstream includes the bit-slip/synchronization structure. The IWM must see the correct *serial pattern*; simply concatenating sector records without sync/gap structure is insufficient.
 
-**[DECISION]** RD output is a bit-cell stream/timed pulse sequence. **Standard SPI NOR tracks store 32+703-byte structured GCR sector records**, reconstructed into a full cyclic RAM track; **RAW_TRACK** mode retains exact packed bits for nonstandard layouts. The ROM performs 6-and-2 conversion; STM32 generates standard sync/gaps without re-encoding payload. RD output must not depend on flash stalls.
+**[DECISION]** RD output is a bit-cell stream/timed pulse sequence. **Standard SPI NOR tracks store 32+703-byte structured GCR sector records**, reconstructed into a full cyclic RAM track; **RAW_TRACK** is a reserved future bit-packed mode for nonstandard layouts; **first-release firmware rejects it as unsupported** (Part 6 §14). The ROM performs 6-and-2 conversion; STM32 generates standard sync/gaps without re-encoding payload. RD output must not depend on flash stalls.
 
 ### 10.6 Full sector structure — exact Macintosh Plus freshly formatted reference
 
@@ -234,9 +234,9 @@ This is **physical stream order**, not the numeric order of logical 512-byte blo
 - Validate track/side, encoded sector IDs and address checksums. **The Plus ROM formatter's default is 2:1 interleave**, but preserve any captured/imported **valid physical-sector permutation**; rotate a standard RAM track to begin with sector 0 without changing successor order (Part 5 §13.4). Preserve the descriptor's chosen valid bit length and circular seam.
 - The **200 initial SYNC6 groups** are a transient format preamble, not a persistent cyclic-track prefix.
 - Complete RAM reconstruction before RD becomes ready. Never change bit lengths mid-playback.
-- **RAW_TRACK** reads preserve bit-packed original data (including nonstandard gaps/sync/splices) without normalization.
+- **First release:** the read engine accepts STRUCTURED_GCR only; RAW_TRACK is a reserved future extension and must be rejected safely, never auto-normalized into standard records (Part 6 §14).
 
-**[DECISION]** Use the standard ROM-compatible gap, seam and cyclic-duration profile described in [Part 5 §13](06-part-5-format-geometry-400k.md). **[OPEN — verification]** Bench-check accepted gap/phase, atypical RAW_TRACK lengths, and the ROM's sector-0 readback on real hardware. Part 3 §11 defines structured and raw persistence.
+**[DECISION]** Use the standard ROM-compatible gap, seam and cyclic-duration profile described in [Part 5 §13](06-part-5-format-geometry-400k.md). **[OPEN — verification]** Bench-check accepted gap/phase and the ROM's sector-0 readback on real hardware; no first-release RAW_TRACK playback test is required. Part 3 §11 defines structured and raw persistence.
 
 ### 10.7 The five zones and track wrapping
 
@@ -295,13 +295,13 @@ Relevant ROM-side errors include:
 
 ~~~text
 SPI NOR: STRUCTURED_GCR records (32 metadata + 703 GCR bytes per sector)
-         or RAW_TRACK (unaltered packed bits)
+         RAW_TRACK reserved for later; not mounted by first-release firmware
       ↓
 Allocate one of >=3 independent >=12-KiB full-track RAM buffers
       ↓
 Standard: validate headers; reconstruct SYNC6, accepted gap, pads,
           stored sector fields, data ending and 2:1 interleave
-RAW_TRACK: replay original packed-bit contents
+RAW_TRACK: unsupported in first release; reject on qualification
       ↓
 Validated cyclic RAM track and sector map
       ↓
@@ -342,8 +342,8 @@ prepare_track(track, side, media):
         records = load_735_byte_sector_records(descriptor)
         validate_headers_sector_identifiers_and_integrity(records)
         buffer = build_cyclic_standard_GCR(records, descriptor)
-    else if descriptor.mode == RAW_TRACK:
-        buffer = load_unchanged_packed_bits(descriptor)
+    else:
+        reject_unsupported_representation_without_modification()
     validate_buffer_bit_length_and_publish_if_selection_matches()
 
 hardware_timed_output:
@@ -398,7 +398,7 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 - **[DECISION]** Section 10 is the only numbered protocol operation in **06 — Part 2**. See **[Part 3 / Section 11](06-part-3-media-architecture.md)** for the common cartridge/timing/metadata architecture and [Part 4 / Section 12](06-part-4-serial-gcr-write.md) for serial write capture.
 - **[DECISION]** The STM32 generates genuine GCR-like **RD electrical pulses** through the unchanged Macintosh IWM.
 - **[DECISION]** One logical-track metadata model (sector count, valid bit length) and **single global GCR calibration** must agree with Part 1's TACH and /READY. The STM32 does not model a physical motor or maintain five separate GCR clocks.
-- **[DECISION]** Standard storage is **32-byte sector metadata + 703 encoded GCR bytes**, preserving address/data headers; STM32 reconstructs full standard gaps/SYNC6/padding in >=3 complete >=12-KiB RAM buffers. Optional RAW_TRACK keeps nonstandard packed bits untouched.
+- **[DECISION]** Standard storage is **32-byte sector metadata + 703 encoded GCR bytes**, preserving address/data headers; STM32 reconstructs full standard gaps/SYNC6/padding in >=3 complete >=12-KiB RAM buffers. RAW_TRACK is **reserved, not implemented in the first release** (Part 6 §14).
 - **[ROM]** Fresh format detail is specified in §10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
@@ -411,12 +411,14 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 3. Cross-check **`3.4.1.2 T1/T2/T3/T6`** edge relationships on original hardware, particularly head switching and write-gate recovery.
 4. Define how to implement **continuous cyclic streams** while not imposing unnecessary initial rotational latency, and determine head-to-head phase relationship if relevant.
 5. Finalize the **32-byte sector-record binary ABI**, structured track-directory bit length/gap/seam/interleave fields and the RAW_TRACK compatibility boundary.
-6. Validate standard-track reconstruction and RAW_TRACK replay against ROM fixtures: transient 200-group preamble, gap adjustment, stored headers, generated sync/pads/slip marks, checksum and immediate readback.
+6. Validate standard-track reconstruction against ROM fixtures: transient 200-group preamble, gap adjustment, stored headers, generated sync/pads/slip marks, checksum and immediate readback; verify unsupported RAW_TRACK is rejected without modification.
 7. Measure **worst-case timer/DMA jitter, CPU loading, memory footprint and SPI flash stalls** for candidate STM32 devices.
 8. Determine exact behaviours for **unformatted media, write splice, speed-zone transition during active output and drive re-enable**.
 9. Define the final boundary between **Part 2 read engine**, **Part 3 shared media state**, and **[Part 4 write capture](06-part-4-serial-gcr-write.md)**, including ownership of RD, track buffers and persistence.
 
 **Document history**
+
+- **2026-11-09 (Section 14 scope update):** First release accepts structured standard 400K/800K GCR only; RAW_TRACK is reserved for later and must be rejected safely. ROM-verified read protocol remains unchanged.
 
 - **2026-11-09 (storage revision):** Standard tracks now use 32+703-byte GCR sector records with preserved address/data headers; full cyclic SYNC6/gaps/padding are reconstructed in >=3 complete 12-KiB RAM buffers. RAW_TRACK preserves untouched nonstandard bits.
 
