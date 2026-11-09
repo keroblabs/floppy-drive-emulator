@@ -20,7 +20,7 @@ Start in `/docs`:
 - [Part 1 — Host interface and drive operations (§§1–9)](docs/06-part-1-drive-interface.md)
 - [Part 2 — Serial GCR reading (§10)](docs/06-part-2-serial-gcr-read.md)
 - **[Part 3 — Media architecture and agreed decisions (§11)](docs/06-part-3-media-architecture.md)**
-- **Part 4 — Serial GCR writing (§12):** planned; later protocol sections 13–18 are listed in Part 1.
+- **[Part 4 — Serial GCR writing (§12)](docs/06-part-4-serial-gcr-write.md):** detailed Sony/IWM/ROM write-path research, with implementation gates; later sections 13–18 are listed in Part 1.
 
 Working folders:
 
