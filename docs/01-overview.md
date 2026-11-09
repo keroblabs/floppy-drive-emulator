@@ -48,7 +48,7 @@ The preferred storage design is a **3D-printed, 3.5-inch floppy-shaped cartridge
 - The cartridge provides removable, non-volatile disk-image storage.
 - The emulator translates drive-level reads and writes into storage operations; the Macintosh need not be aware of SPI flash.
 - An SD-card media path is **not part of the current preferred concept**.
-- **16 Mbit / 2 MiB SPI NOR** is the current capacity target. Media content is **bit-packed raw-GCR**, with a **single global bit-cell timing calibration** and individually described logical tracks (sector count, bit length, flash offset/length). Metadata must be extensible and support upgrades preserving GCR data.
+- **16 Mbit / 2 MiB SPI NOR** is the current capacity target. **Standard tracks use structured encoded-GCR records (32 metadata bytes preserving the encoded address/data headers + 703 GCR data/checksum bytes per sector)**; complete cyclic tracks, SYNC6 and gaps are reconstructed in RAM. **RAW_TRACK** remains an exact bit-packed alternative for nonstandard media. The design requires **at least three >=12-KiB complete-track RAM buffers**, one global timing calibration, logical track descriptors and extensible, migratable metadata.
 - Exact flash allocation/ABI, write persistence, power integrity, contacts and safe removal behaviour remain to be designed; see [06 — Part 3 / Section 11](06-part-3-media-architecture.md).
 
 The desired physical presentation is that of an original Macintosh 3.5-inch floppy drive, with a cartridge inserted through the normal opening.
@@ -124,8 +124,8 @@ Documentation should distinguish **verified source facts**, **observations or me
 - [05 — Cartridge contact concepts](05-cartridge-contact-concepts.md): removable-media contact options.
 - [06 — Part 1 / Sections 1–9: Host interface and drive operations](06-part-1-drive-interface.md): selector, control/status, seek, TACH, readiness and eject.
 - [06 — Part 2 / Section 10: Serial GCR reading](06-part-2-serial-gcr-read.md): waveform, 6-and-2 track structure and freshly formatted track reference.
-- **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** settled raw-GCR representation, one SYNC6 calibration, per-track metadata, TACH contract, extensible SPI-flash directory and cartridge programming workflow.
-- **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate, both-edge WR transitions, ROM sector writes and formatting, proposed STM32 capture/buffering and open splice/flash durability design. Future sections 13–18 are listed in Part 1's roadmap.
+- **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** agreed structured encoded-GCR sector records plus raw-track compatibility, three-buffer cache, one SYNC6 calibration, track descriptors/TACH, 2-MiB allocation budgets, extensible directory and external programming workflow.
+- **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate and both-edge WR capture, 50-SYNC6 candidate format detection, structured sector replacement, asynchronous flash persistence and open power-cut/raw-track write gates. Future sections 13–18 are listed in Part 1's roadmap.
 - `source/`: firmware and/or digital-logic implementation, pending architecture selection.
 - `kicad/`: schematics and PCB design.
 - `3d-drawing/`: mechanical CAD and cartridge/chassis models.
