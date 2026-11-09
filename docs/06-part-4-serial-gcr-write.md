@@ -235,7 +235,7 @@ tE: /WRREQ rising edge
 
 **[DECISION]** For **STRUCTURED_GCR**, keep the sector's **complete 10-byte encoded address field + 4-byte data header + 703 GCR codewords** (735-byte record including 18 bytes of further metadata). **Do not persist** the 200-group preamble, per-sector SYNC6/gap, standard `FF` pad or `DE AA FF FF`. Use the ROM-derived physical sector order and accepted `GapSync` to rebuild the circular RAM track and its known bit length, making it **available for immediate ROM sector-0 readback** regardless of pending SPI persistence. Adjust/rebuild on ROM format retry rather than appending duplicate sectors or retaining a stale track map.
 
-**[OPEN — bootstrapping]** Model/verify the exact wrap seam and amount of residual sync after 200-group overrun, gap-fit/sector-0 return, first-use provisional timing, and behavior if interrupted after partially formatting a valid track. Gate release alone is not sufficient to declare format success; validate before publishing a complete readable track.
+**[DECISION]** The standard circular track is reconstructed using the ROM-compatible geometry/gap/seam contract in [Part 5 §13](06-part-5-format-geometry-400k.md), with the logical RAM buffer starting at sector 0 and an independently advancing read phase. **[OPEN — verification]** Bench-validate post-format sector-0 timing, first-use provisional calibration and interrupted-format recovery. Gate release alone never proves format success.
 
 ### 12.11 SYNC6 automatic calibration during formatting
 
@@ -386,7 +386,7 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 
 - Timer/DMA edge-capture and SYNC6/field framing with bounded jitter and underrun handling.
 - Candidate 32-byte sector-field offsets/CRC algorithm (not a frozen binary ABI).
-- Read-to-write address phase and source timing; approved gap/seam algorithm and ROM first-format readback.
+- Read-to-write address phase and source timing; **hardware qualification** of the agreed ROM-compatible gap/seam reconstruction and immediate first-format readback (Part 5 §13).
 - Exact flash transaction/journal/atomicity, interrupted formatting/ordinary writes, worst-case backlogs and power-cut recovery.
 - RAW_TRACK nonstandard write-splice support (no silent normalization), external importer fidelity and host-to-host calibration transfer.
 - STM32 peripheral/SRAM scheduling, 2-MiB allocation including directory generations, spare blocks and wear.
