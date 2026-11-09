@@ -61,7 +61,7 @@ Sources: [Plus ROM sector write, lines 2547–2719](https://github.com/jonathans
 - **STRUCTURED_GCR (default):** a sector array of **735-byte records**, comprising 32 bytes of metadata (including preserved encoded headers) and 703 bytes of encoded data/checksums. No physical gaps, SYNC6, standard address pad or data-ending padding are persistently stored as part of the sector array.
 - **RAW_TRACK:** bit-packed complete track data, a valid bit count and a wrap point. Replay precisely as recorded, without synthetic gaps/headers or automatic sync normalization. Nonstandard write support remains a separate engineering gate.
 
-**[DECISION]** Standard-track reconstruction produces this ROM-compatible sequence, including the established 2:1 interleave:
+**[DECISION]** Standard-track reconstruction produces the ROM-compatible sequence below. **New Plus ROM formats use 2:1 interleave**, but a track imported/captured with a different valid sector permutation retains its observed physical successor order, normalized to begin at sector 0 (Part 5 §13):
 
 ~~~text
 G x SYNC6 → stored address: D5 AA 96 [T] [S] [H] [F] [X] DE AA
@@ -124,7 +124,7 @@ For **STRUCTURED_GCR**, `data_offset` points to the contiguous sector-record arr
 
 **[DECISION]** No motor zone or circumference simulation. The MCU consumes the track descriptor's logical sector count and bit length, using **one global calibrated GCR bit-cell rate**. The descriptor's sector count also selects the standard TACH status frequency (§11.5), independently of GCR timing. Never invent an index pulse or restart read phase on a mere status selection.
 
-**[OPEN]** Exact binary descriptor ABI, allowed `GapSync` bounds, seam computation and nonstandard track size limits remain to be defined and verified.
+**[DECISION]** Standard circular length, synchronization and seam follow the fixed ROM-compatible reconstruction profile in [Part 5 §13](06-part-5-format-geometry-400k.md), rather than an independent storage option. **[OPEN — implementation]** Exact binary descriptor ABI, encoding of the accepted `GapSync` and bit length, physical timing acceptance and nonstandard RAW_TRACK size limits.
 
 ### 11.5 TACH is independently required by the Plus ROM
 
@@ -144,7 +144,7 @@ For conventional formatted tracks, derive the **target TACH frequency from the d
 
 The original drive emits **60 TACH pulses per physical revolution**, but the emulator implements a **timer-generated status signal**, not a spinning medium. This table is an **electrical compatibility lookup**, not a physical-zone simulation. **No TACH-specific calibration record is stored in each track.**
 
-**[OPEN]** The cyclic read-track bit length and the selected TACH frequency must remain acceptably coherent; a field's length alone is **not** a sufficient guarantee of the ROM's required TACH frequency. The final standard-track generator must verify both constraints when constructing or importing tracks. The exact treatment of nonstandard/custom sector counts and stopped-TACH levels is deferred.
+**[DECISION]** For a standard track the generator obeys both its **ROM-compatible circular duration/gap profile** and the selected **TACH status frequency**. These are fixed host-facing compatibility requirements rather than a choice of alternative virtual lengths. **[OPEN — validation]** Bench-check phase/frequency coherence and determine behavior for nonstandard/custom sector counts and stopped-TACH levels.
 
 ### 11.6 Track playback, sector writes and RAM buffers
 
