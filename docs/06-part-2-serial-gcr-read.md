@@ -231,12 +231,12 @@ This is **physical stream order**, not the numeric order of logical 512-byte blo
 **[DECISION]** Standard SPI NOR tracks comprise **735-byte sector records**: **32-byte metadata retaining the 10-byte GCR address field and 4-byte data header**, plus **703 preserved GCR codewords** (699 encoded tag/data + four encoded data checksums). STM32 constructs the **complete cyclic bitstream into a >=12-KiB RAM track buffer**; it does not normally decode/re-encode user data.
 
 - Generate canonical 48-bit `SYNC6` (`FF 3F CF F3 FC FF`), accepted per-track `GapSync`, `FF` address pad and `DE AA FF FF` data end; retain stored headers and 703 codewords without modification.
-- Validate track/side, encoded sector IDs, address checksums and physical 2:1 interleave; preserve the descriptor's chosen valid bit length and circular seam.
+- Validate track/side, encoded sector IDs and address checksums. **The Plus ROM formatter's default is 2:1 interleave**, but preserve any captured/imported **valid physical-sector permutation**; rotate a standard RAM track to begin with sector 0 without changing successor order (Part 5 §13.4). Preserve the descriptor's chosen valid bit length and circular seam.
 - The **200 initial SYNC6 groups** are a transient format preamble, not a persistent cyclic-track prefix.
 - Complete RAM reconstruction before RD becomes ready. Never change bit lengths mid-playback.
 - **RAW_TRACK** reads preserve bit-packed original data (including nonstandard gaps/sync/splices) without normalization.
 
-**[OPEN]** Verify accepted gap/seam, phase, nonstandard length and ROM sector-0 readback on hardware. Part 3 §11 defines structured and raw persistence.
+**[DECISION]** Use the standard ROM-compatible gap, seam and cyclic-duration profile described in [Part 5 §13](06-part-5-format-geometry-400k.md). **[OPEN — verification]** Bench-check accepted gap/phase, atypical RAW_TRACK lengths, and the ROM's sector-0 readback on real hardware. Part 3 §11 defines structured and raw persistence.
 
 ### 10.7 The five zones and track wrapping
 
@@ -402,7 +402,7 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 - **[ROM]** Fresh format detail is specified in §10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
-- **[DECISION]** Write capture, Sony gate/erase timing, sector writes, format and unresolved splices are specified in **[06 — Part 4, Section 12](06-part-4-serial-gcr-write.md)**.
+- **[DECISION]** Write capture and flash persistence are in **[Part 4 §12](06-part-4-serial-gcr-write.md)**; standard track geometry, physical order, sector-0 origin and formatting/Verify are in **[Part 5 §13](06-part-5-format-geometry-400k.md)**.
 
 **Research/implementation gates before hardware selection:**
 
