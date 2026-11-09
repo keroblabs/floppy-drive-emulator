@@ -6,7 +6,7 @@
 **Target:** Macintosh Plus M0001AP, original ROM `.Sony` driver and IWM, host-facing Sony MFD-51W 800K mechanism  
 **Date:** 9 November 2026
 
-> **Where this part fits:** [Part 1, Sections 1–9](06-part-1-drive-interface.md) documents the host-facing interface, commands, status and TACH; [Part 2, Section 10](06-part-2-serial-gcr-read.md) documents serial reading and the exact freshly formatted GCR track stream. **This Part 3, Section 11** is the common architecture used by **both** reading and writing. **[Part 4, Section 12](06-part-4-serial-gcr-write.md)** develops serial writing and **[Part 5, Section 13](06-part-5-format-geometry-400k.md)** establishes standard 400K/800K geometry, sector ordering and ROM-compatible track reconstruction; later topics begin at Section 14. This is **not** a replacement for either the read or write electrical specifications.
+> **Where this part fits:** [Part 1, Sections 1–9](06-part-1-drive-interface.md) documents the host-facing interface, commands, status and TACH; [Part 2, Section 10](06-part-2-serial-gcr-read.md) documents serial reading and the exact freshly formatted GCR track stream. **This Part 3, Section 11** is the common architecture used by **both** reading and writing. **[Part 4, Section 12](06-part-4-serial-gcr-write.md)** develops serial writing and **[Part 5, Section 13](06-part-5-format-geometry-400k.md)** establishes standard 400K/800K geometry, sector ordering and ROM-compatible track reconstruction; **[Part 6, Section 14](06-part-6-error-handling-standard-media.md)** limits initial support to standard media and specifies fault handling; later topics begin at Section 15. This is **not** a replacement for either the read or write electrical specifications.
 >
 > **Evidence labels:** **[ROM]** observed Plus ROM assembly; **[SONY]** original drive specification; **[DECISION]** agreed project requirement; **[PROPOSED]** candidate implementation, not yet approved as a flash format or hardware design; **[OPEN]** requires engineering, hardware evidence, or a further decision.
 
@@ -50,7 +50,7 @@ NONSTANDARD/RAW_TRACK (first release):
 Reserved ID → reject as unsupported; no silent normalization or flash modification
 ~~~
 
-**[DECISION]** Track buffering and deterministic WR capture/RD output are independent of flash erase/program scheduling. For standard tracks, preserving canonical decoded *structure* is different from changing encoded payload bytes. Nonstandard/raw-only tracks must never be silently canonicalized.
+**[DECISION]** The first firmware reads/writes **standard 400K/800K structured-GCR** tracks only. Track buffering and deterministic WR capture/RD output are independent of flash erase/program scheduling. For standard tracks, preserving canonical decoded *structure* is different from changing encoded payload bytes. Nonstandard/raw-only tracks must never be silently canonicalized.
 
 Sources: [Plus ROM sector write, lines 2547–2719](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2547-L2719); [format path, lines 2883–3078](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2883-L3078).
 
@@ -221,7 +221,7 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 
 **[DECISION]** One successful Macintosh format is a preferred calibration/initialization route, **not** a prerequisite for re-importing every image. After calibration, an external programmer can replace images without discarding that calibration. It must not falsely claim lossless nonstandard reconstruction from decoded 512-byte-only images.
 
-**[OPEN]** First-use provisional timing, host-to-host calibration portability, decoded/tagged/raw input conversion, and safe ejection/commit mechanics need their own implementations.
+**[OPEN]** First-use provisional timing, host-to-host calibration portability, decoded/tagged logical-sector input conversion, missing-tag policy and safe ejection/commit mechanics need their own implementations.
 
 ### 11.10 Constraints and interfaces for subsequent parts
 
