@@ -275,7 +275,7 @@ Source: [Plus ROM formatting and gap fit, lines 2755–2804 and 2883–3078](htt
 | Three-track cache | >=3 complete >=12-KiB buffers plus capture staging, with no active-stream corruption during flash work |
 | Standard TACH and GCR clock | Each profile's TACH matched and global nominal 489,600-bit/s GCR clock bench-measured |
 | Blank media / repeat format | First format works without pre-existing sectors; retries do not append duplicate sector maps |
-| RAW_TRACK isolation | No silent normalization of custom gaps/headers/protection or reinterpretation as standard tracks |
+| Unsupported RAW_TRACK isolation | First-release firmware safely rejects unsupported nonstandard track representations without normalization |
 
 **Interface ownership:**
 
@@ -283,7 +283,7 @@ Source: [Plus ROM formatting and gap fit, lines 2755–2804 and 2883–3078](htt
 - [Part 3 §11](06-part-3-media-architecture.md): representation IDs, 735-byte records, descriptors, >=3 cache buffers, global calibration and allocation.
 - [Part 4 §12](06-part-4-serial-gcr-write.md): WR gate, both-edge capture, 50-SYNC6 classification, standard data-field replacement and SPI flush scheduling.
 - **This §13:** standard geometry, side/format semantics, physical ordering, fixed-format sector reconstruction, circular loop and ROM format/verify behavior.
-- **Future §14:** errors, unusual sequences, interrupted operations and safe recovery.
+- **[Part 6 / §14](06-part-6-error-handling-standard-media.md):** standard-media errors, unusual operational sequences, interrupted writes, cartridge faults and safe recovery.
 
 ### 13.12 Settled decisions and remaining engineering gates
 
@@ -295,7 +295,7 @@ Source: [Plus ROM formatting and gap fit, lines 2755–2804 and 2883–3078](htt
 - ROM-generated tracks use **2:1 physical interleave**. Preserve the **actual valid recorded sector order**; identify sectors from their stored headers, normalize circular RAM origin to **sector 0** without changing successor order.
 - Store **32 metadata + 703 unchanged encoded GCR codewords** per sector, including preserved complete address/data headers. Rebuild SYNC6, gaps and fixed pad/slip regions in a complete RAM track; do not persist the transient 200-group preamble.
 - Standard **circular duration, gaps and wrap** reproduce the ROM-compatible track profile. Buffer index zero and live RD phase are different coordinates. No simulated mechanics or arbitrary delay.
-- Format must support immediate genuine ROM **sector-0** gap/address readback, possible gap retries and a separate full-disk Verify; RAW_TRACK remains unnormalized for unknown/nonstandard media.
+- Format must support immediate genuine ROM **sector-0** gap/address readback, possible gap retries and a separate full-disk Verify; nonstandard RAW_TRACK support is **reserved for the future and unsupported initially** (Part 6 §14).
 - At least **three >=12-KiB complete-track buffers** plus separate edge-capture staging and asynchronous flash persistence, subject to safe ejection and durability.
 
 **Engineering validation/implementation tasks (not reopened architectural decisions):**
@@ -303,7 +303,7 @@ Source: [Plus ROM formatting and gap fit, lines 2755–2804 and 2883–3078](htt
 - Record the ROM-compatible circular wrap/gap and first post-format readback waveforms on the target Macintosh; prove timer jitter and phase continuity against the real IWM.
 - Establish exact 32-byte sector metadata and track-descriptor binary ABI/CRC, with standard physical-order lookup and accepted `GapSync` fields.
 - Verify alternative sector permutations and 400K single-sided operation with real ROM test media.
-- Implement protected flash transactions, dirty-generation/buffer exhaustion policy, power-fail/eject recovery and RAW_TRACK write limitations in later sections.
+- Implement protected flash transactions, dirty-generation/buffer exhaustion policy and power-fail/eject recovery; initial RAW_TRACK reading/writing is **not required** (Part 6 §14).
 
 **Document history**
 
