@@ -7,7 +7,7 @@
 **Implementation platform:** STM32 preferred; exact MCU, electrical buffers and timing architecture not yet chosen  
 **Last updated:** 9 November 2026
 
-> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** now develops serial writing; future sections remain **13–18**. These numbers do not imply approval of outstanding implementation details.
+> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** develops serial writing; **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)** develops standard formatting, track reconstruction and 400K compatibility; future sections remain **14–18**. These numbers do not imply approval of outstanding implementation details.
 >
 > **Purpose:** Specify the *host-visible operations* of the Sony drive, not only its pinout. Check required operations against the Macintosh Plus ROM `.Sony` driver. A scaffold heading is a research plan, not an approved firmware requirement.
 >
