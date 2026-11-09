@@ -6,7 +6,7 @@
 **Target:** Macintosh Plus M0001AP, original IWM and ROM `.Sony` driver, emulated Sony MFD-51W 800K drive  
 **Date:** 9 November 2026
 
-> **Document sequence:** [Part 1 / §§1–9](06-part-1-drive-interface.md) establishes the drive's host interface, controls/status, readiness and TACH; [Part 2 / §10](06-part-2-serial-gcr-read.md) establishes reading and the exact freshly formatted GCR stream; [Part 3 / §11](06-part-3-media-architecture.md) locks the common raw-track, calibration and SPI cartridge principles. **This Part 4 / §12** specifies serial writing. Future §13 covers further format/geometry/400K cases, §14 fault sequences, §15 electrical integration, §16 STM32 hardware design, §17 validation, and §18 decisions.
+> **Document sequence:** [Part 1 / §§1–9](06-part-1-drive-interface.md) establishes the drive's host interface, controls/status, readiness and TACH; [Part 2 / §10](06-part-2-serial-gcr-read.md) establishes reading and the exact freshly formatted GCR stream; [Part 3 / §11](06-part-3-media-architecture.md) locks structured/RAW_TRACK storage, calibration and SPI cartridge principles. **This Part 4 / §12** specifies serial writing. **[Part 5 / §13](06-part-5-format-geometry-400k.md)** specifies standard format/geometry/400K cases; future §14 covers fault sequences, §15 electrical integration, §16 STM32 hardware design, §17 validation, and §18 decisions.
 >
 > **Evidence labels:** **[SONY]** original Sony/Apple 800K drive electrical specification; **[IWM]** Apple IWM/SWIM hardware reference; **[ROM]** actual Plus ROM; **[DECISION]** project agreement; **[PROPOSED]** candidate engineering method; **[OPEN]** must be resolved/tested before claiming conformance. A ROM implementation detail is **not** proof of the timing of an external pin.
 
