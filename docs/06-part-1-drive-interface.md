@@ -7,7 +7,7 @@
 **Implementation platform:** STM32 preferred; exact MCU, electrical buffers and timing architecture not yet chosen  
 **Last updated:** 9 November 2026
 
-> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** develops serial writing; **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)** develops standard formatting, track reconstruction and 400K compatibility; future sections remain **14–18**. These numbers do not imply approval of outstanding implementation details.
+> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** develops serial writing; **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)** develops standard formatting, track reconstruction and 400K compatibility; **[Part 6 / Section 14](06-part-6-error-handling-standard-media.md)** establishes standard-media error/interrupt handling; future sections remain **15–18**. These numbers do not imply approval of outstanding implementation details.
 >
 > **Purpose:** Specify the *host-visible operations* of the Sony drive, not only its pinout. Check required operations against the Macintosh Plus ROM `.Sony` driver. A scaffold heading is a research plan, not an approved firmware requirement.
 >
@@ -1155,7 +1155,7 @@ Distinguish **a blank, format-capable medium** from **unreadable/failed flash**:
 - A *failed/unqualified* cartridge should not be advertised as a newly readable disk. Whether to keep it logically absent or present-but-not-ready after a fault is an **[OPEN]** error-policy choice that must be made deterministically.
 - A *write-protected* cartridge is still a valid readable disk; its `/WRTPRT=0` response is not a failure.
 
-**[DECISION]** Standard structured 32+703-byte encoded-GCR records (including preserved address/data headers), optional exact RAW_TRACK representation, >=3 complete >=12-KiB buffers, global GCR calibration and extensible track metadata are defined in [Part 3 / Section 11](06-part-3-media-architecture.md). The precise on-flash binary ABI, atomic flash operations and failure recovery remain **[OPEN]**.
+**[DECISION]** Standard structured 32+703-byte encoded-GCR records (including preserved address/data headers), reserved RAW_TRACK extension (not initially implemented), >=3 complete >=12-KiB buffers, global GCR calibration and extensible track metadata are defined in [Part 3 / Section 11](06-part-3-media-architecture.md). The precise on-flash binary ABI, atomic flash operations and failure recovery remain **[OPEN]**.
 
 ### 9.8 Write-protect sources, caching and enforcement
 
@@ -1322,10 +1322,11 @@ This continuous protocol is split by responsibility. **Part 3 / Section 11** sit
 - **[Section 11 — Shared media, calibration and cartridge architecture (Part 3)](06-part-3-media-architecture.md#11-shared-structured-gcrraw-track-media-timing-and-cartridge-architecture):** current, agreed principles and open implementation questions.
 - **[Section 12 — Serial GCR writing (Part 4)](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing):** developed, with hardware splice/flash persistence open.
 - **[Section 13 — Format, sector geometry, sides and 400K compatibility (Part 5)](06-part-5-format-geometry-400k.md#13-operation-format-sector-geometry-sides-and-400k-compatibility):** developed; standard 400K/800K geometry, preserved sector order, structured GCR reconstruction, seam and ROM verification.
-- **Sections 14–17:** error handling, electrical, implementation and verification work still planned.
+- **[Section 14 — Standard-media errors and unexpected sequences (Part 6)](06-part-6-error-handling-standard-media.md#14-error-handling-and-unexpected-sequences):** developed; robust normal-operation failures, safe media transitions and first-release format limits.
+- **Sections 15–17:** electrical, implementation and verification work still planned.
 - **Section 18:** future consolidated decision log; historical notes retained in the appendix.
 
-### Developed Sections 12–13 and planned Sections 14–17
+### Developed Sections 12–14 and planned Sections 15–17
 
 ### Section 12: Operation: serial GCR writing — [developed in Part 4](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing)
 
@@ -1335,9 +1336,9 @@ Sony gate and both-edge WR capture, IWM write handshake, ROM sector writes, full
 
 ROM `Sony_CtlFormat`, `SONY_DOFORMAT`, `SONY_FILLINMARKS`, `SONY_FORMATTRACK` and separate `Sony_CtlVerify`, five fixed sector-count profiles, side/format values, 2:1 ROM interleave versus preserved alternate physical order, structured 32+703 reconstruction, sector-0 buffer origin, ROM-compatible cyclic seam and immediate gap readback are specified in [Part 5](06-part-5-format-geometry-400k.md). The STM32 reproduces host-visible logical disk behavior without a physical spindle model.
 
-### Planned Section 14: Operation: error handling and unusual sequences
+### Section 14: Operation: error handling and unexpected sequences — [developed in Part 6](06-part-6-error-handling-standard-media.md#14-error-handling-and-unexpected-sequences)
 
-**TO DEVELOP.** No disk, bad data, repeated step, out-of-range track, not-ready timeout, eject/write collision, unexpected removal, underrun, power loss and recovery.
+Standard 400K/800K image-only first-release scope and errors on otherwise normal media (blank/absent/protected, interrupted sector writes, repeated formatting/writes, flash failures, pinned cache exhaustion, sudden removal and safe eject) are documented in [Part 6](06-part-6-error-handling-standard-media.md). Exotic/raw bit-level formats are not required initially.
 
 ### Planned Section 15: Electrical requirements and timing
 
