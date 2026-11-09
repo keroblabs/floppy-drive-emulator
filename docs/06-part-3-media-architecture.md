@@ -86,7 +86,7 @@ SYNC6 = FF 3F CF F3 FC FF (48 transmitted bits, MSB first)
 
 **[DECISION]** Generate all standard SYNC6/gap/fixed pad and slip bytes only in known standard regions. Rebuild the complete RAM track **before** exposing it on RD; do not insert/delete bits during active serial playback. For RAW_TRACK the exact stored bit sequence is authoritative. [Part 2 §10.6](06-part-2-serial-gcr-read.md#106-full-sector-structure--exact-macintosh-plus-freshly-formatted-reference) is the ROM stream reference.
 
-**[OPEN]** Exact circular seam/gap fitting, accepted bit length, special/partially formatted tracks and RAW_TRACK write semantics require hardware/ROM tests; the standardized representation is not bit-perfect archival storage for unknown copy protection.
+**[DECISION]** Standard cyclic length, accepted gaps and sector-0 seam are reconstructed to the Macintosh ROM-compatible profile in [Part 5 §13](06-part-5-format-geometry-400k.md); they are not new architectural choices. **[OPEN — verification]** Bench-check phase/gap return and unusual/partially formatted RAW_TRACK behavior. Structured storage is not bit-perfect archival storage of unknown copy protection.
 
 ### 11.3 Global bit-cell timing and SYNC6 calibration
 
@@ -225,13 +225,15 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 
 ### 11.10 Constraints and interfaces for subsequent parts
 
-**Part 1 / ``1–9:** Defines electrical pins, status/control, seeks, READY/TACH, eject and insertion. TACH depends on logical sector count, not on simulated motor geometry.
+**Part 1 / §§1–9:** Defines electrical pins, status/control, seeks, READY/TACH, eject and insertion. TACH depends on logical sector count, not on simulated motor geometry.
 
 **Part 2 / §10:** Defines actual RD pulses and exact ROM-standard serial GCR track reference. For STRUCTURED_GCR, the read engine consumes the **fully reconstructed RAM cyclic track**; for RAW_TRACK it consumes the unchanged packed-bit RAM track.
 
 **[Part 4 / §12](06-part-4-serial-gcr-write.md):** Defines both-edge WR capture, the 50-consecutive-SYNC6 **candidate format** discriminator, encoded field validation/structured replacement, >=3 complete-track buffers, asynchronous persistence and unresolved failure handling. It must preserve immediate post-format sector-0 readback and not claim write success merely from gate release.
 
-**Later work ``13–18:** Format/400K edge cases; faults; electrical timing; STM32 peripherals; acceptance; decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
+**[Part 5 / §13 — formatting, geometry and 400K](06-part-5-format-geometry-400k.md):** Defines fixed sector-count classes and standard TACH, 400K/800K format flags and side handling, preserved physical sector order with sector 0 as the circular buffer origin, reconstruction, ROM-compatible seam and format/Verify readback.
+
+**Later work §§14–18:** Faults; electrical timing; STM32 peripherals; acceptance; decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
 
 ### 11.11 Decisions, proposals and open questions
 
