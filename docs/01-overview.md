@@ -1,6 +1,6 @@
 # Macintosh Plus Floppy-Disk Emulator — Project Overview
 
-**Status:** Agreed project baseline (6 November 2026)  
+**Status:** Agreed project baseline; shared GCR/media decisions updated 9 November 2026  
 **Primary target:** Macintosh Plus M0001AP  
 **Emulated device:** Sony MFD-51W 800K floppy-disk drive mechanism  
 **Primary connection:** Macintosh Plus internal 20-pin drive interface
@@ -48,7 +48,8 @@ The preferred storage design is a **3D-printed, 3.5-inch floppy-shaped cartridge
 - The cartridge provides removable, non-volatile disk-image storage.
 - The emulator translates drive-level reads and writes into storage operations; the Macintosh need not be aware of SPI flash.
 - An SD-card media path is **not part of the current preferred concept**.
-- Flash capacity, disk-image layout, write persistence, power integrity, contact scheme and safe removal behaviour remain to be designed.
+- **16 Mbit / 2 MiB SPI NOR** is the current capacity target. Media content is **bit-packed raw-GCR**, with a **single global bit-cell timing calibration** and individually described logical tracks (sector count, bit length, flash offset/length). Metadata must be extensible and support upgrades preserving GCR data.
+- Exact flash allocation/ABI, write persistence, power integrity, contacts and safe removal behaviour remain to be designed; see [06 — Part 3 / Section 11](06-part-3-media-architecture.md).
 
 The desired physical presentation is that of an original Macintosh 3.5-inch floppy drive, with a cartridge inserted through the normal opening.
 
@@ -89,7 +90,7 @@ Macintosh Plus M0001AP
   with SPI flash and contacts
 ```
 
-This is a **functional decomposition only**. We have **not** selected a microcontroller, FPGA, CPLD or hybrid implementation. That choice follows electrical-interface analysis and timing assessment; no particular processor family or polling architecture is currently committed.
+This is a **functional decomposition only**. **STM32 is the preferred implementation platform**, but no specific part, peripherals, electrical buffer or interrupt/DMA architecture is yet committed. The design requires deterministic GCR pulse output and write-transition capture; ordinary GPIO polling has not been validated.
 
 ## 4. Explicit project boundaries
 
@@ -121,6 +122,10 @@ Documentation should distinguish **verified source facts**, **observations or me
 - [03 — MFD-51W versus MFD-51W-03](03-mfd-51w-vs-mfd-51w-03.md): mechanism and revision differences.
 - [04 — Chassis and mechanics quick-start](04-chassis-and-mechanics-quickstart.md): mechanical measurement and development.
 - [05 — Cartridge contact concepts](05-cartridge-contact-concepts.md): removable-media contact options.
+- [06 — Part 1 / Sections 1–9: Host interface and drive operations](06-part-1-drive-interface.md): selector, control/status, seek, TACH, readiness and eject.
+- [06 — Part 2 / Section 10: Serial GCR reading](06-part-2-serial-gcr-read.md): waveform, 6-and-2 track structure and freshly formatted track reference.
+- **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** settled raw-GCR representation, one SYNC6 calibration, per-track metadata, TACH contract, extensible SPI-flash directory and cartridge programming workflow.
+- **06 — Part 4 / Section 12:** serial writing (planned, not yet created). Future sections 13–18 are listed in Part 1's roadmap.
 - `source/`: firmware and/or digital-logic implementation, pending architecture selection.
 - `kicad/`: schematics and PCB design.
 - `3d-drawing/`: mechanical CAD and cartridge/chassis models.
