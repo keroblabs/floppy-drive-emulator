@@ -7,7 +7,7 @@
 **Implementation platform:** STM32 preferred; exact MCU, electrical buffers and timing architecture not yet chosen  
 **Last updated:** 9 November 2026
 
-> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates raw-GCR cartridge architecture, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** now develops serial writing; future sections remain **13–18**. These numbers do not imply approval of outstanding implementation details.
+> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** now develops serial writing; future sections remain **13–18**. These numbers do not imply approval of outstanding implementation details.
 >
 > **Purpose:** Specify the *host-visible operations* of the Sony drive, not only its pinout. Check required operations against the Macintosh Plus ROM `.Sony` driver. A scaffold heading is a research plan, not an approved firmware requirement.
 >
@@ -74,7 +74,7 @@
    - [9.10 STM32 lifecycle model](#910-preliminary-mediaeject-state-machine-and-outputs)
    - [9.11 Verification and decisions](#911-verification-matrix-and-open-decisions)
 10. **[Serial GCR disk-data reading — Part 2](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading)** — developed in a separate document.
-11. **[Shared media architecture — Part 3](06-part-3-media-architecture.md#11-shared-raw-gcr-media-timing-and-cartridge-architecture)** — developed.
+11. **[Shared media architecture — Part 3](06-part-3-media-architecture.md#11-shared-structured-gcrraw-track-media-timing-and-cartridge-architecture)** — developed.
 12. **[Serial write-data capture — Part 4](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing)** — developed (gate, WR edges, RAM capture, sector writes and format).
 13–18. **[Future sections — roadmap](#continuation-and-future-parts)** — updated numbering.
 
@@ -1155,7 +1155,7 @@ Distinguish **a blank, format-capable medium** from **unreadable/failed flash**:
 - A *failed/unqualified* cartridge should not be advertised as a newly readable disk. Whether to keep it logically absent or present-but-not-ready after a fault is an **[OPEN]** error-policy choice that must be made deterministically.
 - A *write-protected* cartridge is still a valid readable disk; its `/WRTPRT=0` response is not a failure.
 
-**[DECISION]** Shared raw-GCR, global calibration and logical-track metadata are consolidated in [Part 3 / Section 11](06-part-3-media-architecture.md). The exact on-flash binary format, allocation and fault metadata remain **[OPEN]**.
+**[DECISION]** Standard structured 32+703-byte encoded-GCR records (including preserved address/data headers), optional exact RAW_TRACK representation, >=3 complete >=12-KiB buffers, global GCR calibration and extensible track metadata are defined in [Part 3 / Section 11](06-part-3-media-architecture.md). The precise on-flash binary ABI, atomic flash operations and failure recovery remain **[OPEN]**.
 
 ### 9.8 Write-protect sources, caching and enforcement
 
@@ -1319,7 +1319,7 @@ The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: t
 This continuous protocol is split by responsibility. **Part 3 / Section 11** sits between **Part 2 / Section 10** reading and the now-developed **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** writing procedure. Earlier planned Sections 12–17 were shifted to **13–18**.
 
 - **[Section 10 — Serial GCR reading (Part 2)](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading):** detailed read path and freshly formatted stream.
-- **[Section 11 — Shared media, calibration and cartridge architecture (Part 3)](06-part-3-media-architecture.md#11-shared-raw-gcr-media-timing-and-cartridge-architecture):** current, agreed principles and open implementation questions.
+- **[Section 11 — Shared media, calibration and cartridge architecture (Part 3)](06-part-3-media-architecture.md#11-shared-structured-gcrraw-track-media-timing-and-cartridge-architecture):** current, agreed principles and open implementation questions.
 - **[Section 12 — Serial GCR writing (Part 4)](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing):** developed, with hardware splice/flash persistence open.
 - **Sections 13–17:** additional protocol, electrical, implementation and verification work.
 - **Section 18:** future consolidated decision log; historical notes retained in the appendix.
