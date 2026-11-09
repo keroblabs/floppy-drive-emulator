@@ -17,6 +17,10 @@ Start in `/docs`:
 - `/docs/03-mfd-51w-vs-mfd-51w-03.md`
 - `/docs/04-chassis-and-mechanics-quickstart.md`
 - `/docs/05-cartridge-contact-concepts.md`
+- [Part 1 — Host interface and drive operations (§§1–9)](docs/06-part-1-drive-interface.md)
+- [Part 2 — Serial GCR reading (§10)](docs/06-part-2-serial-gcr-read.md)
+- **[Part 3 — Media architecture and agreed decisions (§11)](docs/06-part-3-media-architecture.md)**
+- **Part 4 — Serial GCR writing (§12):** planned; later protocol sections 13–18 are listed in Part 1.
 
 Working folders:
 
