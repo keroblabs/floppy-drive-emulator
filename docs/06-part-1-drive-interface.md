@@ -1312,7 +1312,7 @@ The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: t
 8. Verify that the physical design's *partial-eject position* does not accidentally requalify the same cartridge while still electrically connected.
 9. Keep software eject on the common LSTRB command interface with **pins 9 and 20 left unconnected**, independent of the chosen cable revision.
 
-**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), [Section 12](06-part-4-serial-gcr-write.md) (write gate, capture and persistence requirements), Section 14 (power-fail/media faults), Section 15 (electrical response timing), and Section 16 (STM32 state and peripherals).
+**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), [Section 12](06-part-4-serial-gcr-write.md) (write gate, capture and persistence requirements), [Section 13](06-part-5-format-geometry-400k.md) (standard track reconstruction, geometry and 400K/800K formatting), Section 14 (power-fail/media faults), Section 15 (electrical response timing), and Section 16 (STM32 state and peripherals).
 
 ## Continuation and future parts
 
@@ -1321,18 +1321,19 @@ This continuous protocol is split by responsibility. **Part 3 / Section 11** sit
 - **[Section 10 — Serial GCR reading (Part 2)](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading):** detailed read path and freshly formatted stream.
 - **[Section 11 — Shared media, calibration and cartridge architecture (Part 3)](06-part-3-media-architecture.md#11-shared-structured-gcrraw-track-media-timing-and-cartridge-architecture):** current, agreed principles and open implementation questions.
 - **[Section 12 — Serial GCR writing (Part 4)](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing):** developed, with hardware splice/flash persistence open.
-- **Sections 13–17:** additional protocol, electrical, implementation and verification work.
+- **[Section 13 — Format, sector geometry, sides and 400K compatibility (Part 5)](06-part-5-format-geometry-400k.md#13-operation-format-sector-geometry-sides-and-400k-compatibility):** developed; standard 400K/800K geometry, preserved sector order, structured GCR reconstruction, seam and ROM verification.
+- **Sections 14–17:** error handling, electrical, implementation and verification work still planned.
 - **Section 18:** future consolidated decision log; historical notes retained in the appendix.
 
-### Preserved research scaffolds for planned Sections 12–17
+### Developed Sections 12–13 and planned Sections 14–17
 
 ### Section 12: Operation: serial GCR writing — [developed in Part 4](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing)
 
 Sony gate and both-edge WR capture, IWM write handshake, ROM sector writes, full-track format, SYNC6 calibration, RAM buffer design and persistence engineering gates are developed in [Part 4](06-part-4-serial-gcr-write.md). This is a navigation stub rather than a duplicate specification.
 
-### Planned Section 13: Operation: format, sector geometry, sides and 400K compatibility
+### Section 13: Operation: format, sector geometry, sides and 400K compatibility — [developed in Part 5](06-part-5-format-geometry-400k.md#13-operation-format-sector-geometry-sides-and-400k-compatibility)
 
-**TO DEVELOP.** ROM `Sony_CtlFormat`, `SONY_DOFORMAT`, `SONY_FILLINMARKS`. Standard formatted track sector counts 12/11/10/9/8 across 80 radial tracks; head selection, interleave, checksums, format bytes, 400K compatibility, standard-track generation and fit/seam constraints. The STM32 uses **logical sector counts/bit lengths**, not a physical spindle model.
+ROM `Sony_CtlFormat`, `SONY_DOFORMAT`, `SONY_FILLINMARKS`, `SONY_FORMATTRACK` and separate `Sony_CtlVerify`, five fixed sector-count profiles, side/format values, 2:1 ROM interleave versus preserved alternate physical order, structured 32+703 reconstruction, sector-0 buffer origin, ROM-compatible cyclic seam and immediate gap readback are specified in [Part 5](06-part-5-format-geometry-400k.md). The STM32 reproduces host-visible logical disk behavior without a physical spindle model.
 
 ### Planned Section 14: Operation: error handling and unusual sequences
 
