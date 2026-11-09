@@ -60,6 +60,17 @@
    - [8.10 STM32 architecture](#810-proposed-stm32-timingready-architecture)
    - [8.11 Test matrix and open items](#811-verification-matrix-and-unresolved-details)
 9. [Operation: disk insertion, protection and eject](#9-operation-disk-insertion-protection-and-eject)
+   - [9.1 Interface signals and responsibilities](#91-interface-signals-selectors-and-software-responsibilities)
+   - [9.2 Status polarity and empty-drive behaviour](#92-exact-sense-polarities-and-the-empty-drive-case)
+   - [9.3 ROM insertion polling](#93-macintosh-plus-periodic-disk-insertion-detection)
+   - [9.4 First access and protection](#94-first-disk-access-presence-recalibration-and-write-protection)
+   - [9.5 Software eject sequence](#95-software-eject-command-and-required-host-visible-sequence)
+   - [9.6 Logical versus physical eject](#96-logical-ejection-versus-physical-cartridge-release--a-necessary-new-state)
+   - [9.7 Cartridge qualification](#97-insertion-qualification-and-cartridge-identity)
+   - [9.8 Write-protect enforcement](#98-write-protect-sources-caching-and-enforcement)
+   - [9.9 Flash removal and durability](#99-abrupt-removal-power-interruption-and-safe-flash-writes)
+   - [9.10 STM32 lifecycle model](#910-preliminary-mediaeject-state-machine-and-outputs)
+   - [9.11 Verification and decisions](#911-verification-matrix-and-open-decisions)
 10. [Operation: serial GCR disk-data reading](#10-operation-serial-gcr-disk-data-reading)
 11. [Operation: serial write-data capture](#11-operation-serial-write-data-capture)
 12. [Operation: format, speed zones, sides and 400K compatibility](#12-operation-format-speed-zones-sides-and-400k-compatibility)
@@ -998,7 +1009,308 @@ This is the **functional architecture**. No STM32 part number, clock tree, DMA c
 
 ## 9. Operation: disk insertion, protection and eject
 
-**TO DEVELOP.** ROM: `Sony_Check4Disk`, `Sony_CkDIP`, `Sony_Eject`. Specify inserted/empty states, write protection, latch/eject acknowledgement, disk removal, physical cartridge release handoff, and safe media-change handling.
+**Status:** Apple 1985/1986 hardware sense semantics, Macintosh Plus ROM media discovery/first-access/eject sequence and eject timing investigated. Cartridge electrical/mechanical implementation, flash write-persistence guarantees and unusual media-fault responses are proposed, **not yet validated**.
+
+**Core principle:** The Macintosh sees an **electrical/logical removable disk**, not the SPI flash contacts or physical release mechanism. Keep the following distinct: (1) physical cartridge present, (2) cartridge electrically qualified, (3) media logically inserted/exposed through `/CSTIN`, (4) data stream ready through `/READY`, (5) write permission through `/WRTPRT`, and (6) a cartridge that has been logically ejected but has not yet physically left the mechanism.
+
+### 9.1 Interface signals, selectors and software responsibilities
+
+There are **no separate disk-present, write-protect, or eject-complete pins** on the common internal MFD-51W host connector. These are drive statuses selected onto RD (pin 16). Commands use the same selection signals and an LSTRB rising edge, as described in Sections 4 and 6.
+
+| Operation | Interface | Project selector | ROM address | Meaning |
+|---|---|---|---|---|
+| Read disk-in-position status | RD via CA0/CA1/CA2/SEL | `0x1` | `2 / DIPAdr` | `/CSTIN=0`: disk-in position; normally inserted media |
+| Read write-protect status | RD via CA0/CA1/CA2/SEL | `0x3` | `6 / WrProtAdr` | `/WRTPRT=0`: protected **or no disk** |
+| Read transfer readiness | RD via CA0/CA1/CA2/SEL | `0xD` | `11 / ReadyAdr` | `/READY=0`: data transfers may proceed |
+| Read drive installed | RD via CA0/CA1/CA2/SEL | `0xE` | `13 / DrvExstAdr` | `/DRVIN=0`: mechanism/emulator installed, even if empty |
+| Read eject latch/operation | RD via CA0/CA1/CA2/SEL | `0x6` | `12 / EjectLAdr` | EJECT readback exists in Sony table; exact original-Plus usage remains **[OPEN]** |
+| **Command software eject** | LSTRB rising with CA1=1, CA0=1, SEL=0, CA2=1 | `0xE` | `13 / EjectHAdr` | Begin eject operation; **not pin 9** |
+| Host drive selection | `/ENBL.INT`, pin 14 | — | IWM `intDrive` + `mtrOn` | Must be active for status access and command |
+| Write-data acceptance | `/WRREQ`, WR, enable and media protection | — | IWM write path | Only accept changes to permitted media; Section 11 |
+
+**[DECISION]** Emulator connector **pins 9 and 20 are NC**. The revision-specific hardware eject input on certain Sony drives is not used. **Software eject through the regular addressed command is mandatory**.
+
+### 9.2 Exact sense polarities and the empty-drive case
+
+**[DOC]** Apple 699-0321 (1985), `3.2.4.8–3.2.4.9, and 699-0452-A (1986), same subsections, specify:
+
+- `/CSTIN` reads **0** if a diskette is inserted **OR** if the original eject/inject mechanism is at the disk-in position **even without a diskette**. The latter is a mechanical exception, not evidence of valid magnetic data.
+- `/WRTPRT` reads **0** when a **write-protected disk is inserted OR no diskette is inserted**. It is **1 only with inserted writable media**.
+- `/READY=0` additionally requires appropriate head/motor/readiness conditions. Disk presence by itself is not readiness.
+- `/DRVIN=0` identifies a connected mechanism independently of media insertion.
+
+**[DECISION]** Because our emulator has no Sony mechanical injected-without-disk position, the initial host-visible model maps `/CSTIN` to **logical media presentation** (not merely an unqualified contact switch). There is no reason to invent Sony's empty-mechanism exception unless testing reveals a dependency.
+
+| Emulator state (internal interface enabled) | `/CSTIN` | `/WRTPRT` | `/READY` | `/DRVIN` | Interpretation |
+|---|---:|---:|---:|---:|---|
+| **Empty / logically ejected** | **1** | **0** | **1** | **0** | Installed drive, **no disk**, not ready, protected by default |
+| Insertion detected, contacts/image not yet qualified | **1** | **0** | **1** | **0** | Do not announce unstable/unusable media |
+| **Inserted, writable, ready** | **0** | **1** | **0** | **0** | Normal writable disk |
+| **Inserted, write-protected, ready** | **0** | **0** | **0** | **0** | Reading permitted; writing denied |
+| Inserted, writable, **not ready** | **0** | **1** | **1** | **0** | Correct media presence; preparation/fault keeps transfer disabled |
+| Inserted, read-only, **not ready** | **0** | **0** | **1** | **0** | Present but not transfer-ready |
+| Eject command accepted; media not yet logically withdrawn | **0** | As above | **1** | **0** | Transient; **no new writes** may begin |
+| Ejected and awaiting physical removal | **1** | **0** | **1** | **0** | **Must not reannounce** the still-connected cartridge |
+
+This is a **proposed emulated status contract**, distinct from the physical Sony edge case. A **blank/unformatted but electrically healthy** cartridge may be logically inserted and ready for formatting: do not mistakenly equate “no recognized Macintosh filesystem” with “no disk.”
+
+**Important correction to oversimplified status logic:** Computing `/WRTPRT = !write_protected` unconditionally is **wrong**. A suitable derived expression is:
+
+~~~text
+/WRTPRT = 1 only if (logical_media_present AND media_write_permitted)
+           otherwise 0
+~~~
+
+The lack of a slash prefix on the project's boolean variable `write_protected` is intentional.
+
+### 9.3 Macintosh Plus periodic disk insertion detection
+
+**[ROM]** [`Sony_DiskVBLTask`, lines 1991–2024](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1991-L2024) is a periodic task, normally invoked at **30 VBL ticks (~0.5 s)**. It skips media inspection if a driver request is active and may first attend to pending motor power-down.
+
+For floppy drives, [`Sony_Check4Disk` / `SONY_CKDIP_SENSE`, lines 2028–2070](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2028-L2070) works approximately as follows:
+
+1. Confirm the drive is installed in the ROM's drive table.
+2. Inspect the ROM's **software** `DiskInPlace` state. **1 or 2 means already recognized** and normally avoids another insertion probe.
+3. If it is **0**, select the drive and read `DIPAdr`, the Sony `/CSTIN` status.
+4. When `/CSTIN=0` (disk in), post **`diskInsertEvt` (event 7)** with the drive number.
+5. On successful event post, set software `DiskInPlace=1` (detected, but not yet prepared), and invalidate the driver's software track position.
+6. Further handling occurs on first disk access (next subsection).
+
+The **STM32 does not post Macintosh events**, inspect System files or manipulate the ROM's `DiskInPlace` variable. It only presents the electrical `/CSTIN` status. The Macintosh's existing ROM/OS decides when to announce and mount the inserted disk.
+
+**[ROM]** After software eject the driver loads `DiskInPlace=EjectWait`, normally `−4`, and increments it on successive VBL calls until it reaches zero before allowing normal insertion detection again. At nominal 0.5-s cadence this is roughly a **two-second *host-side*** suppression interval. **[DECISION]** Do not add a second arbitrary two-second “mechanical eject delay” in the STM32; instead ensure that the same ejected cartridge cannot be rediscovered through `/CSTIN` once the ROM's suppression expires.
+
+### 9.4 First disk access: presence, recalibration and write protection
+
+**[ROM]** [`Sony_DiskPrime`, lines 545–583](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L545-L583):
+
+1. Verify the drive is installed, select it, and **read `/CSTIN` again**, even if the ROM previously believed a disk was inserted. This handles a disk that disappeared outside the normal eject path.
+2. If `/CSTIN=1`, clear the ROM's `DiskInPlace` and return **`offLinErr = −65`**. In this path the ROM also disables the drive.
+3. If present but not previously prepared (software `DiskInPlace≠2`), perform a first-access sequence: **`Sony_FastPower`**, **recalibration to track 0**, **`Sony_MakeSpdTbl`**, then **read `/WRTPRT`**.
+4. Cache the protection result in the ROM's `WriteProt` variable, set software `DiskInPlace=2` (prepared), and proceed.
+5. On a subsequent *write* request with cached write protection active, return **`wPrErr = −44`**. Read requests are still permitted.
+
+**[ROM]** For an 800K/new-interface drive, `Sony_MakeSpdTbl` takes an approximately **800-ms host-side disk-seating wait** rather than performing 400K PWM speed calibration ([lines 1778–1795](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L1778-L1795)). Do not add a matching delay for mechanical realism in the STM32.
+
+**[DECISION]** A cartridge's write-protect setting should be stable while it is logically mounted, or its change must be handled conservatively (e.g., force read-only and prohibit further writes) because the ROM **caches** the original readback. The emulator itself must enforce write protection **even if the host's cached value becomes stale**.
+
+**Important:** Media being *formatted/unformatted* is not a valid reason to deassert `/CSTIN`. An inserted blank disk still needs to be visible for host formatting, even if ordinary sector reads fail until formatting.
+
+### 9.5 Software eject: command and required host-visible sequence
+
+**[DOC]** Original Sony 699-0452-A, `3.2.4.4, `3.4.7 (printed sheet 32) and `2.17.1 (sheet 15) define a **software eject command**. On a qualified **LSTRB rising edge** with `CA1=1, CA0=1, SEL=0, CA2=1` (project `0xE` / ROM `EjectHAdr=13`), the drive begins eject. The **EJECT control state goes high** and returns low upon the rising edge of `/CSTIN` (disk exits) or after **2 seconds maximum**. The mechanism's specified eject completion time is **≤1.5 seconds**.
+
+**[ROM]** [`SONY_CTL_EJECT` / `SONY_NEWDRVEJECT`, lines 440–480](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L440-L480) performs:
+
+1. Invalidate the Macintosh's track cache and command the spindle **off**, without immediately leaving the interface disabled.
+2. Select/keep the drive enabled, then **wait 200 ms** before issuing eject.
+3. Address **`EjectHAdr` (13)**; raise LSTRB to initiate eject and **lower it promptly** for a newer 800K drive. The **older 400K** path instead uses a much longer ~0.75-s strobe; it is **not** the MFD-51W requirement.
+4. For the 800K path, poll **`/CSTIN`**, first after **100 ms** and then roughly every **100 ms**, with **up to 16 checks (~1.6 s)**. Success is `/CSTIN=1`.
+5. Wait an additional **1 ms** after completion or the bounded poll loop, then set the ROM's negative `EjectWait` suppression counter. **The routine follows its success-completion path even after polling expires**; it is not a reliable physical-cartridge-release acknowledgement.
+
+| Sony mechanism timing parameter | Original electrical/mechanical requirement | STM32 relevance |
+|---|---|---|
+| Motor off before LSTRB eject | **≥200 ms** | Host does this; no extra simulated delay required |
+| Eject LSTRB pulse | **≥1.0 µs; ≤300 ms** | Accept rising edge; do not require a held 400K-style pulse |
+| Eject completion (`/CSTIN` rises) | **≤1.5 s** | Bound logical removal/acknowledgement when eject succeeds; flash safety still mandatory |
+| Keep `/ENBL` low after `/CSTIN` rises | **≥150 µs** | The Plus driver waits at least another 1 ms |
+| Internal EJECT high duration | **≤2 s** | Ensure eject state eventually returns inactive; distinguish from cartridge mechanical travel |
+
+**[DOC]** An already-initiated eject operation **may finish after /ENBL becomes high**. RD is nevertheless **high impedance while /ENBL is high**; internal eject/cartridge state is a separate matter.
+
+### 9.6 Logical ejection versus physical cartridge release — a necessary new state
+
+Our selected media concept is a **3D-printed 3.5-inch floppy-shaped cartridge containing SPI flash and mating contacts** ([Document 05](05-cartridge-contact-concepts.md)). Its **actual insertion, retention and release mechanisms have not been designed or approved** ([Document 04](04-chassis-and-mechanics-quickstart.md)). Do not assume the cartridge is physically expelled, loses SPI contact, or has an eject motor identical to Sony's.
+
+A robust design distinguishes at least these events:
+
+1. **Eject requested:** accept the LSTRB command. Stop accepting new writes for the current medium; prevent further stale GCR data. Mark the operation as pending.
+2. **Safe-to-withdraw:** any *already accepted* writes are committed safely or their recovery is resolved. This is not the same instant as receiving the command.
+3. **Logical eject acknowledged:** report `/CSTIN=1`, `/WRTPRT=0`, `/READY=1`; invalidate the mounted image/track cache. This is the signal the Macintosh ROM actually waits for.
+4. **Physical release requested/completed:** drive any future latch/actuator if one is selected; handle sensor/contact changes safely. This is an *independent mechanical subsystem*, not a prerequisite for the interface design to be studied.
+5. **Awaiting full removal:** **even if the cartridge remains seated and contacts still conduct**, keep it **logically absent** until a confirmed, debounced removal-and-new-insertion cycle (or another explicitly designed user action) occurs.
+
+**[DECISION]** Introduce **`EJECTED_AWAIT_REMOVAL`** (or equivalent) so the same cartridge does **not** reappear as a fresh disk after the ROM's own ~2-second `EjectWait` suppression expires. Merely mapping `/CSTIN` directly to contact continuity would cause the Macintosh to rediscover an already-ejected image.
+
+**[OPEN]** The ordering of actual physical release versus completion of flash commits depends on the final retention and actuator design. The electronics must not permit the cartridge to be withdrawn while the design still depends on it to persist data **without an explicit, tested failure-recovery guarantee**. A future paperclip/manual-release path may defeat an electronic interlock and needs separate protection.
+
+### 9.7 Insertion qualification and cartridge identity
+
+The 3.5-inch form factor is a **physical package**, not a host-visible indication of the SPI flash protocol. Candidate cartridge-side signals already discussed in [Document 05](05-cartridge-contact-concepts.md) include presence detection, cartridge identity/profile and an optional write-protect input.
+
+**[PROPOSED]** A safe insertion sequence is:
+
+1. Detect that a physical cartridge is being inserted, and **debounce/validate its settled position** with a yet-to-be-selected sensor/contact arrangement.
+2. Establish safe power/contact continuity (including ground-first if designed), start/identify SPI flash and ensure that partial contact cannot write to flash or spuriously reset/drive the host lines.
+3. Validate that the cartridge has usable backing storage (including a valid *blank* medium representation), learn its geometry/capacity and write policy, and prepare enough data/state to answer future reads correctly.
+4. **Only after qualification**, set logical media present: `/CSTIN=0`. The ROM can now discover the disk on its next polling cycle.
+5. Assert `/READY=0` only when separately allowed by motor state and data-engine readiness. Insertion alone does not imply ready.
+
+Distinguish **a blank, format-capable medium** from **unreadable/failed flash**:
+
+- A *blank but healthy* cartridge should remain logically present and be format-capable under whatever media-layout scheme we choose.
+- A *present but temporarily not-ready* cartridge reports `/CSTIN=0`, `/READY=1`. This avoids pretending an electrical storage fault is an eject event.
+- A *failed/unqualified* cartridge should not be advertised as a newly readable disk. Whether to keep it logically absent or present-but-not-ready after a fault is an **[OPEN]** error-policy choice that must be made deterministically.
+- A *write-protected* cartridge is still a valid readable disk; its `/WRTPRT=0` response is not a failure.
+
+**[OPEN]** Media ID generation, flash layout and fault metadata should not be invented here. Define them in the media-format/flash documentation once storage architecture is selected.
+
+### 9.8 Write-protect sources, caching and enforcement
+
+Possible causes of a non-writable cartridge include a deliberate write-protect setting, a read-only media profile, a hardware write-protect contact/switch (if selected), or protective firmware mode after detecting a storage fault.
+
+**[DECISION]** The host-visible `/WRTPRT` is derived from **logical presence AND permission to modify the current cartridge**. It must return **0** for **no media** and for **inserted protected media**, and **1** only when the current logical disk is present and writable.
+
+**[ROM]** The Plus driver samples `/WRTPRT` on the first access and stores a cached value (`WriteProt`). It is not necessarily re-read before every sector write. Therefore:
+
+- STM32 firmware must **enforce write protection independently** of the host's cached bit.
+- A change from writable to protected while mounted may result in the host attempting writes it previously expected to succeed; do not modify flash. Define a controlled media-change/error policy (not invented successful writes).
+- A change from protected to writable should not silently override an OS-cached read-only decision. A **logical eject and fresh insertion** is the conservative way to reannounce a changed policy.
+- Some write-protect transitions may be implemented purely in cartridge firmware metadata and may not correspond to a mechanical floppy tab. That is permitted provided host behaviour is correct.
+
+**[DOC]** Apple `3.2.5 specifies recording only when **/WRTGATE=0**, **/ENBL=0** and media **not write-protected**. Section 11 must specify how the Macintosh Plus's `/WRREQ` maps to Sony's gate and how invalid writes are rejected/ignored without ever corrupting flash.
+
+### 9.9 Abrupt removal, power interruption and safe flash writes
+
+Unlike magnetic media, an SPI flash cartridge may be vulnerable to power/contact interruptions during an erase/program operation. A physically pulled cartridge might become electrically absent **before** firmware has finished persistence.
+
+**[DESIGN REQUIREMENT / OPEN IMPLEMENTATION]** Establish clear durability semantics before promising a functional eject:
+
+- **Completed writes must not be silently lost** when the Macintosh receives a successful logical eject. Any buffering or flash journal must be committed/recoverable beforehand.
+- Prevent **new writes** once software eject has been accepted for that cartridge; settle or reject in-flight transfers according to Section 11's eventual write-operation contract.
+- Never continue issuing SPI flash erase/program commands to contacts known to be open or unstable.
+- On unexpected withdrawal: **immediately mark media not ready**, remove `/CSTIN` after qualified removal, stop disk-stream access, and protect later cartridge insertions from stale buffers belonging to the earlier cartridge.
+- Power-fail detection, emergency energy storage, atomic page/sector mapping, verification, journaling and media generation numbers are possible approaches, **not approved designs**.
+- Do not make a false **successful eject** claim to the host while outstanding data could be lost. If the durability operation cannot complete within the Sony/ROM eject window, treat it as a **design problem to solve and test**, not permission to violate data integrity.
+- If power loss or manual removal occurs despite safeguards, restore from a consistent committed state after reinsertion where possible, and surface failures through appropriate subsequent I/O behaviour. The Sony drive interface has **no extra generic SPI-flash error-status register**.
+
+**[OPEN]** Choose physical contacts, sequencing, removal interlock and flash write algorithm after power and worst-case programming latency are measured. The present discussion defines the correctness goal, not a guarantee that an arbitrary flash device or detachable connector can meet it.
+
+### 9.10 Preliminary media/eject state machine and outputs
+
+**[PROPOSED]** Separate physical-contact detection from host-visible media state. This is functional pseudocode only; the actual STM32 event scheduling, timer qualification and storage handling remain open.
+
+~~~text
+State:
+    EMPTY                       # no logical media, no recently ejected cartridge
+    QUALIFYING                  # contacts/media identification in progress
+    PRESENT_UNREADY             # accepted media but GCR stream not yet ready
+    PRESENT_READY               # accepted media; transfer-ready if motor on
+    EJECT_PENDING               # host requested eject; block new writes
+    EJECTED_AWAIT_REMOVAL       # logically absent, even if contacts still present
+    MEDIA_FAULT                 # exact external policy to be determined
+
+Physical inputs (internal, not Sony pins):
+    cartridge_sensor
+    contact_valid
+    cartridge_identity
+    write_protect_source       # optional physical pin/metadata
+    media_storage_health
+
+On STM32 startup:
+    host_RD = HIGH_IMPEDANCE until safe to drive
+    motor_commanded = OFF
+    logical_media_present = false until qualified
+    determine physical cartridge/contact state
+    if reliable cartridge already inserted:
+        qualify and present it (policy for boot-time cartridge [OPEN])
+
+On debounced *new physical insertion* from a genuinely absent condition:
+    state = QUALIFYING
+    stop disk data, prohibit writes
+    if cartridge identification and backing media qualify:
+        state = PRESENT_UNREADY
+        logical_media_present = true       # /CSTIN becomes 0
+        write_permission = mounted_media_policy
+        prepare selected data stream
+        if data prepared:
+            state = PRESENT_READY
+    else:
+        present no false READY; resolve fault policy
+
+On motor/track status changes:
+    derive /READY from logical_media_present, motor, stream validity,
+                        and absence of conflicting transition/fault
+
+On LSTRB software-EJECT command, if a logical disk is present:
+    state = EJECT_PENDING
+    block new writes; stop exposing stale data
+    complete or recover all accepted write operations safely
+    if durable-and-safe:
+        unmount logical disk; /CSTIN=1; /WRTPRT=0; /READY=1
+        state = EJECTED_AWAIT_REMOVAL
+        request physical release if mechanism selected
+    else:
+        retain safe fault/pending state; do NOT claim successful eject
+        # timeout/error policy [OPEN]
+
+On cartridge physically removed:
+    stop GCR and storage access; protect open contacts
+    cancel invalid in-memory references to removed medium
+    /CSTIN=1; /WRTPRT=0; /READY=1
+    if state == EJECTED_AWAIT_REMOVAL:
+        state = EMPTY
+    else:
+        state = EMPTY                        # unexpected/manual removal
+    # any incomplete flash writes require recovery/error handling
+
+When state == EJECTED_AWAIT_REMOVAL:
+    always present logical no-disk, regardless of remaining contact continuity
+    do not automatically re-present the same cartridge after ROM EjectWait
+
+Derived RD, when enabled:
+    project 0x1 /CSTIN  = logical_media_present ? 0 : 1
+    project 0x3 /WRTPRT = (logical_media_present && write_permission) ? 1 : 0
+    project 0xD /READY  = can_actually_transfer_data() ? 0 : 1
+    project 0xE /DRVIN  = 0         # emulator itself remains installed
+    project 0x6 EJECT   = eject_command_state  # readback semantics pending
+
+When /ENBL disabled:
+    RD = HIGH_IMPEDANCE
+    # do not erase cartridge/eject state, and do not abort safe persistence
+~~~
+
+The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: the logical motor command and selected stream must also allow transfer. This state model is intentionally conservative.
+
+**Implementation caution:** The simulated drive must not manufacture a media eject merely because the Macintosh deselects the drive or commands MOTOR OFF. **Eject is a separate command** and physical cartridge removal is another event.
+
+### 9.11 Verification matrix and open decisions
+
+| Test case | Expected electrical/logical result | Confidence |
+|---|---|---|
+| Power on, no cartridge | `/CSTIN=1`, `/WRTPRT=0`, `/READY=1`; `/DRVIN=0` | [DOC]/[DECISION] |
+| Empty cartridge slot, no software eject | Remains empty, no disk-in event from ROM | [ROM]/[DECISION] |
+| Fully qualified, writable cartridge inserted | `/CSTIN=0`, `/WRTPRT=1`; ready subject to motor/stream | [DOC]/[DECISION] |
+| Fully qualified, write-protected cartridge inserted | `/CSTIN=0`, `/WRTPRT=0`; reads allowed, writes denied | [DOC]/[ROM] |
+| Insert blank but format-capable cartridge | Host sees disk present even if filesystem/sector fields are absent | [DECISION] |
+| Cartridge contact bounce during insertion | No repeated present/absent events; no flash write during partial contact | [PROPOSED] |
+| ROM VBL poll detects insertion | Plus posts `diskInsertEvt=7`; software `DiskInPlace` goes 0→1 | [ROM] |
+| First read/write after insertion | ROM checks `/CSTIN`, motor, recalibration, `/WRTPRT`; caches prepared state | [ROM] |
+| Read after unexpected manual removal | ROM sees `/CSTIN=1` and returns `offLinErr=-65` | [ROM] |
+| Host attempts write to protected media | Host may return `wPrErr=-44`; firmware also blocks underlying flash modification | [ROM]/[DECISION] |
+| Software eject with no pending writes | Qualified command causes `/CSTIN=1` within the compatible window; /READY=1 | [DOC]/[DECISION] |
+| Software eject while flash programming | No successful logical eject before accepted data are durable/recoverable | [DESIGN REQUIREMENT] |
+| Ejected cartridge remains physically seated | `/CSTIN` stays **1**, preventing rediscovery after host suppression expires | [DECISION] |
+| Cartridge removed fully, later reinserted | A **new** qualified insertion can be announced; no stale track/write buffers | [DECISION] |
+| /ENBL high during accepted eject | RD tri-state; internal safe eject progression not cancelled just by deselection | [DOC] |
+| Software eject times out | Do not imply ROM `noErr` proves physical release; investigate error and release policy | [ROM]/[OPEN] |
+| Media removed while data stream active | Stop stale stream, report not-ready and absent; guard flash contacts | [DECISION] |
+| Write-protect changed without removing media | Firmware never writes when protected, regardless of cached host status | [DECISION] |
+| Power fails during dirty flash commit | No silent cross-cartridge corruption; recover/indicate fault with selected scheme | [OPEN] |
+
+**Open items to settle before hardware/firmware approval:**
+
+1. The detailed **physical cartridge insertion/retention/eject actuator** and how a paperclip/manual release interacts with SPI flash safety.
+2. Precise strategy for **durable write acknowledgement** and maximum flash commit/erase duration relative to the 1.5-second Sony eject completion requirement.
+3. Whether a media fault before logical insertion should be **logically absent** or **present but not ready**, and when to promote a temporarily unready medium back to ready.
+4. Whether the chosen cartridge design includes a **physical write-protect sensor**, flash metadata flag, both, or another scheme; ensure host protection remains stable during a mounted session.
+5. Decide the explicit **EJECT state readback** at project `0x6` after testing original MFD-51W output and ROM/third-party use.
+6. Determine acceptable detection/debounce and RD-response timing for **unexpected removal** and re-insertion; keep flash electrical safety separate from host-visible timing.
+7. Validate both **Macintosh Plus ROM insertion/eject paths** and nonstandard/third-party software behaviour with a real host or instrumented emulator.
+8. Verify that the physical design's *partial-eject position* does not accidentally requalify the same cartridge while still electrically connected.
+9. Keep software eject on the common LSTRB command interface with **pins 9 and 20 left unconnected**, independent of the chosen cable revision.
+
+**Related future sections:** Section 10 (GCR reads and blank/unformatted media), Section 11 (write gating, buffering, persistence), Section 13 (power-fail/media faults), Section 14 (electrical response timing), Section 15 (STM32 state and peripherals).
 
 ## 10. Operation: serial GCR disk-data reading
 
@@ -1058,6 +1370,7 @@ This is the **functional architecture**. No STM32 part number, clock tree, DMA c
 
 ### Change history
 
+- **2026-11-09 (Section 9):** Developed Macintosh Plus disk-insertion, ROM VBL polling and first-access state; corrected the empty-drive `/WRTPRT=0` semantics and documented Sony's special empty-but-injected `/CSTIN` case; specified software eject timing, ROM post-eject suppression, logically ejected/physically retained cartridge state, qualification, write protection, flash-durability constraints and tests. Section 9 remains open for mechanical and storage-design implementation decisions.
 - **2026-11-06 (Section 8):** Added motor-control versus IWM drive-enable distinction, five authentic RPM zones and derived 60-pulse/revolution TACH rates, the ROM's **unexpected 800K ReSeek tach-speed validation**, /READY conditions and timing diagrams, automatic-insertion caveats, and STM32 timer/ready state model with validation tests. No physical spin-up or seek delays added as requirements.
 - **2026-11-06 (Section 7):** Expanded the ROM-driven one-track seek and recalibration operations, /STEP acknowledgement versus /READY, /TK0 status, original step/access timing diagrams and limits, 80-track geometry, immediate virtual stepping, STM32 state model and validation matrix. Documented hardware-only physical timing as *limits*, not required artificial delays.
 - **2026-11-06 (Section 6):** Added the eight-pattern /DIRTN, /STEP, /MOTORON and EJECT command table, LSTRB rising-edge protocol, both 1985/1986 timing references (including an explicit T4/T5 discrepancy), actual Plus ROM issue sequences, short 800K eject handling, and an STM32 command decoder/test model. Sections 5 and 7–16 remain for later analysis.
