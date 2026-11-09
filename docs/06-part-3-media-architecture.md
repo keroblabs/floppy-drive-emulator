@@ -6,7 +6,7 @@
 **Target:** Macintosh Plus M0001AP, original ROM `.Sony` driver and IWM, host-facing Sony MFD-51W 800K mechanism  
 **Date:** 9 November 2026
 
-> **Where this part fits:** [Part 1, Sections 1–9](06-part-1-drive-interface.md) documents the host-facing interface, commands, status and TACH; [Part 2, Section 10](06-part-2-serial-gcr-read.md) documents serial reading and the exact freshly formatted GCR track stream. **This Part 3, Section 11** is the common architecture used by **both** reading and writing. **Part 4, Section 12** is reserved for the detailed serial writing procedure; later topics begin at Section 13. This is **not** a replacement for either the read or write electrical specifications.
+> **Where this part fits:** [Part 1, Sections 1–9](06-part-1-drive-interface.md) documents the host-facing interface, commands, status and TACH; [Part 2, Section 10](06-part-2-serial-gcr-read.md) documents serial reading and the exact freshly formatted GCR track stream. **This Part 3, Section 11** is the common architecture used by **both** reading and writing. **[Part 4, Section 12](06-part-4-serial-gcr-write.md)** develops the detailed serial writing procedure; later topics begin at Section 13. This is **not** a replacement for either the read or write electrical specifications.
 >
 > **Evidence labels:** **[ROM]** observed Plus ROM assembly; **[SONY]** original drive specification; **[DECISION]** agreed project requirement; **[PROPOSED]** candidate implementation, not yet approved as a flash format or hardware design; **[OPEN]** requires engineering, hardware evidence, or a further decision.
 
@@ -144,7 +144,7 @@ The original drive emits **60 TACH pulses per physical revolution**, but the emu
 
 **[DECISION — architecture, not detailed timing]** Use RAM buffering so captured WR transitions are **not** written directly to SPI flash in a time-critical loop. A useful initial model separates a current **complete track bit buffer** from a **sector-sized incoming write-capture buffer**. The STM32 captures raw pulses/bits, aligns them with the virtual track phase and updates only the written region; unaffected sectors remain intact. The format path must also accept extended whole-track writes.
 
-**[OPEN — Part 4/§12]** The exact read-to-write handoff, `/WRREQ` gate qualification, first/last WR edge, write-splice alignment, asynchronous phase or clock differences, gap overwrite length, handling variable-length writes and recovery from underrun **are not yet settled**. A write-gate edge alone does **not** prove a byte-aligned insertion address. No promise of a particular merge algorithm is made in this part.
+**[OPEN — Part 4/§12]** The [detailed write analysis](06-part-4-serial-gcr-write.md) examines the exact read-to-write handoff, `/WRREQ` gate qualification, first/last WR edge, write-splice alignment, asynchronous phase or clock differences, gap overwrite length, handling variable-length writes and recovery from underrun **are not yet settled**. A write-gate edge alone does **not** prove a byte-aligned insertion address. No promise of a particular merge algorithm is made in this part.
 
 **[DECISION]** RAM cache is **not** durability. A Macintosh may finish a sector write and power off or eject without changing tracks; therefore **committing only on track changes is insufficient**. Actual flash commit/journal, atomicity, timing and safe removal remain open for Part 4 and the future storage documentation.
 
@@ -228,7 +228,7 @@ The external image-preparation program does **not** need to generate real-time s
 
 **Part 2 / §10:** Retains the electrical RD waveform, bitstream clock, complete freshly formatted track reference, sync-pattern bit layout, GCR sector marks and cyclic playback. Raw-GCR flash is the source of ordinary read data. Canonical sync construction is a bounded track-preparation function, not an arbitrary alteration of the read stream.
 
-**Part 4 / §12 — serial GCR writing (planned):** Specify gate/WR edges, timer capture, bit alignment and splices, normal sector writes vs whole-track format, shared RAM buffer state and durable flash commits. It must honor the global calibration and per-track bit lengths described here.
+**[Part 4 / §12 — serial GCR writing](06-part-4-serial-gcr-write.md):** Developed Sony both-edge WR, gate timing, IWM handshake, ROM sector writes versus whole-track formatting, SYNC6 calibration, proposed buffers and flash persistence requirements. Exact write-splice timing and durable flash transaction algorithms remain open. Part 4 honors the global calibration and per-track bit lengths described here.
 
 **Later docs, §§13–18 (planned):** §13 formatting/400K details; §14 errors; §15 electrical timing; §16 STM32 firmware/peripherals; §17 verification; §18 ongoing open questions/decision log. Proposed **Document 50 onward** may expand cartridge allocation, calibration, programmer software and image conversion, but cannot silently contradict this shared architectural baseline.
 
@@ -267,4 +267,5 @@ The external image-preparation program does **not** need to generate real-time s
 
 **Document history**
 
+- **2026-11-09:** Linked developed [Part 4 / Section 12](06-part-4-serial-gcr-write.md) for the detailed write path; retained Section 11 as the shared architecture and kept unresolved hardware/flash details open.
 - **2026-11-09:** Created **06 — Part 3 / §11** to consolidate agreed media, SYNC6 calibration, logical track, TACH and external programmer architecture. Renumbered planned **serial writing to Part 4 / §12**, and deferred later protocol sections to **§§13–18**. No binary flash layout or write-timing algorithm is implied by this documentation reorganization.
