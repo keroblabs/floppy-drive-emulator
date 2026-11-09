@@ -28,7 +28,6 @@
 
 ## 11. Shared structured-GCR/raw-track media, timing and cartridge architecture
 
-
 ### 11.1 Responsibility boundary and data flow
 
 **[DECISION]** Emulate the Sony drive's **host-visible electrical and logical behaviour**, using the original Macintosh ROM, MC68000, IWM and VIA. Do not emulate physical mechanics, acoustic delays, spin-up, artificial seek time or rotation for realism. Electrical waveforms, write gating, RD status/TACH and timing requirements remain mandatory.
@@ -54,7 +53,6 @@ SPI NOR RAW_TRACK packed bits → RAM unchanged → timed RD pulses
 **[DECISION]** Track buffering and deterministic WR capture/RD output are independent of flash erase/program scheduling. For standard tracks, preserving canonical decoded *structure* is different from changing encoded payload bytes. Nonstandard/raw-only tracks must never be silently canonicalized.
 
 Sources: [Plus ROM sector write, lines 2547–2719](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2547-L2719); [format path, lines 2883–3078](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2883-L3078).
-
 
 ### 11.2 Structured GCR, raw-track compatibility and synchronization
 
@@ -86,7 +84,7 @@ SYNC6 = FF 3F CF F3 FC FF (48 transmitted bits, MSB first)
 
 **[ROM]** Formatting sends **200 SYNC6 groups as a transient write lead-in**. This is **not** a permanent 200-group prefix in the resulting cyclic track. Per-sector `GapSync` begins at seven groups and may be adjusted by ROM readback. The accepted gap policy and the reconstructed track's seam/wrap length must be recorded at track level; do not assume seven forever.
 
-**[DECISION]** Generate all standard SYNC6/gap/fixed pad and slip bytes only in known standard regions. Rebuild the complete RAM track **before** exposing it on RD; do not insert/delete bits during active serial playback. For RAW_TRACK the exact stored bit sequence is authoritative. [Part 2 `10.6](06-part-2-serial-gcr-read.md#106-full-sector-structure--exact-macintosh-plus-freshly-formatted-reference) is the ROM stream reference.
+**[DECISION]** Generate all standard SYNC6/gap/fixed pad and slip bytes only in known standard regions. Rebuild the complete RAM track **before** exposing it on RD; do not insert/delete bits during active serial playback. For RAW_TRACK the exact stored bit sequence is authoritative. [Part 2 §10.6](06-part-2-serial-gcr-read.md#106-full-sector-structure--exact-macintosh-plus-freshly-formatted-reference) is the ROM stream reference.
 
 **[OPEN]** Exact circular seam/gap fitting, accepted bit length, special/partially formatted tracks and RAW_TRACK write semantics require hardware/ROM tests; the standardized representation is not bit-perfect archival storage for unknown copy protection.
 
@@ -103,7 +101,6 @@ SYNC6 = FF 3F CF F3 FC FF (48 transmitted bits, MSB first)
 **Critical limits:** SYNC6 timing calibration measures the **incoming IWM write stream relative to the STM32 timer**. It cannot by itself prove RD voltage levels, pulse width/polarity, tri-state behavior, write-gate setup/hold, oscillator stability or every host electrical tolerance. These require **design validation**, but no user-facing manual oscilloscope calibration should be necessary once hardware is validated. The initial format must function on the nominal timing baseline to obtain the measurement.
 
 **[DECISION]** Store timing calibration in **global cartridge metadata**, distinct from the raw disk image and track directory. The external programmer must preserve it when changing a disk image. **[OPEN]** Calibration portability between different emulator units and host machines, oscillator drift and a fallback/un-calibrated policy require explicit rules.
-
 
 ### 11.4 Logical track descriptors, without a motor-zone model
 
@@ -125,7 +122,7 @@ LogicalTrack:
 
 For **STRUCTURED_GCR**, `data_offset` points to the contiguous sector-record array; `used_bytes = sector_count × 735` for this revision. The RAM playback track is larger than the flash sector array and has a separately calculated valid bit count. For **RAW_TRACK**, `data_offset` points to packed bits and `valid_bit_length` limits the final byte/wrap point. Never confuse a physical flash allocation length with reconstructed circular bit length.
 
-**[DECISION]** No motor zone or circumference simulation. The MCU consumes the track descriptor's logical sector count and bit length, using **one global calibrated GCR bit-cell rate**. The descriptor's sector count also selects the standard TACH status frequency (`11.5), independently of GCR timing. Never invent an index pulse or restart read phase on a mere status selection.
+**[DECISION]** No motor zone or circumference simulation. The MCU consumes the track descriptor's logical sector count and bit length, using **one global calibrated GCR bit-cell rate**. The descriptor's sector count also selects the standard TACH status frequency (§11.5), independently of GCR timing. Never invent an index pulse or restart read phase on a mere status selection.
 
 **[OPEN]** Exact binary descriptor ABI, allowed `GapSync` bounds, seam computation and nonstandard track size limits remain to be defined and verified.
 
@@ -149,7 +146,6 @@ The original drive emits **60 TACH pulses per physical revolution**, but the emu
 
 **[OPEN]** The cyclic read-track bit length and the selected TACH frequency must remain acceptably coherent; a field's length alone is **not** a sufficient guarantee of the ROM's required TACH frequency. The final standard-track generator must verify both constraints when constructing or importing tracks. The exact treatment of nonstandard/custom sector counts and stopped-TACH levels is deferred.
 
-
 ### 11.6 Track playback, sector writes and RAM buffers
 
 **[ROM]** The ordinary Plus ROM write modifies **one data field**, after reading the target address; `Sony_WrData` does not rewrite its address field. `SONY_DOFORMAT` writes an entire track/side and the ROM immediately checks sector 0, potentially retrying with a different `GapSync`.
@@ -162,8 +158,7 @@ The original drive emits **60 TACH pulses per physical revolution**, but the emu
 
 **[DECISION]** SPI flash persistence is an **asynchronous worker** decoupled from capture, with erase/program work permitted during subsequent host operations. Dirty cache is not durable. Track changes alone may not trigger the only commit, because the Macintosh can finish a write and eject or power down without changing track. Implement an explicit safe-eject/durability/error policy; with only three buffers, backlog/buffer exhaustion must be detected and cannot silently discard accepted writes.
 
-**[OPEN]** Final hardware edge alignment, atomic publication, flash commit/recovery, performance under continuous sector writes, underrun and buffer saturation require validation in [Part 4 `12](06-part-4-serial-gcr-write.md).
-
+**[OPEN]** Final hardware edge alignment, atomic publication, flash commit/recovery, performance under continuous sector writes, underrun and buffer saturation require validation in [Part 4 §12](06-part-4-serial-gcr-write.md).
 
 ### 11.7 SPI-flash layout, 735-byte records and centralized metadata
 
@@ -197,7 +192,6 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 
 **[REFERENCE TIMING — not a final flash selection]** The Microchip [SST26VF016B datasheet](https://ww1.microchip.com/downloads/en/DeviceDoc/SST26VF016B-2.5V-3.0V-16-Mbit-Serial-Quad-IO-SQI-Flash-Memory-Data-Sheet-DS20005262F.pdf) lists maximum 25 ms per 4-KiB erase and 1.5 ms per 256-byte page program. Sequential erase + page-program upper-bound **internal operation** budgets are therefore **127.5 / 98.0 / 93.5 / 89.0 / 84.5 ms** for 12/11/10/9/8-sector tracks, respectively. Excludes SPI transfers, command/polling, verification, metadata commits, contention and retries. The actual selected chip must be benchmarked.
 
-
 ### 11.8 Versioning, forward extension and lossless metadata upgrades
 
 **[DECISION]** A previously programmed cartridge must allow **metadata/schema upgrades without loss of stored sector records or raw-track content**. Version superblocks, directories and record representations independently; never reinterpret unknown format versions as if they were current.
@@ -207,7 +201,6 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 **[DECISION]** Separate representation IDs for **STRUCTURED_GCR (32+703)** and **RAW_TRACK (bit-packed length)**, and a separately versioned global calibration record. Upgrading metadata should preserve both existing GCR contents and the global calibration. A conversion between representations is a distinct operation with explicit fidelity limits.
 
 **[OPEN]** Power-cut atomicity, protection of unaffected erase units, wear accounting and safe recovery require the actual flash choice and an on-media transaction design.
-
 
 ### 11.9 Cartridge formatting, external programming and reuse
 
@@ -230,17 +223,15 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 
 **[OPEN]** First-use provisional timing, host-to-host calibration portability, decoded/tagged/raw input conversion, and safe ejection/commit mechanics need their own implementations.
 
-
 ### 11.10 Constraints and interfaces for subsequent parts
 
 **Part 1 / ``1–9:** Defines electrical pins, status/control, seeks, READY/TACH, eject and insertion. TACH depends on logical sector count, not on simulated motor geometry.
 
-**Part 2 / `10:** Defines actual RD pulses and exact ROM-standard serial GCR track reference. For STRUCTURED_GCR, the read engine consumes the **fully reconstructed RAM cyclic track**; for RAW_TRACK it consumes the unchanged packed-bit RAM track.
+**Part 2 / §10:** Defines actual RD pulses and exact ROM-standard serial GCR track reference. For STRUCTURED_GCR, the read engine consumes the **fully reconstructed RAM cyclic track**; for RAW_TRACK it consumes the unchanged packed-bit RAM track.
 
-**[Part 4 / `12](06-part-4-serial-gcr-write.md):** Defines both-edge WR capture, the 50-consecutive-SYNC6 **candidate format** discriminator, encoded field validation/structured replacement, >=3 complete-track buffers, asynchronous persistence and unresolved failure handling. It must preserve immediate post-format sector-0 readback and not claim write success merely from gate release.
+**[Part 4 / §12](06-part-4-serial-gcr-write.md):** Defines both-edge WR capture, the 50-consecutive-SYNC6 **candidate format** discriminator, encoded field validation/structured replacement, >=3 complete-track buffers, asynchronous persistence and unresolved failure handling. It must preserve immediate post-format sector-0 readback and not claim write success merely from gate release.
 
 **Later work ``13–18:** Format/400K edge cases; faults; electrical timing; STM32 peripherals; acceptance; decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
-
 
 ### 11.11 Decisions, proposals and open questions
 
