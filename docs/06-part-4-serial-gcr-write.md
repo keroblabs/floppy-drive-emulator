@@ -223,7 +223,7 @@ tE: /WRREQ rising edge
 
 **[DECISION — structured standard tracks]** After reconstructing the incoming serial GCR codewords, identify `SYNC6`, `D5 AA AD`, the encoded sector ID, **703 GCR data/checksum bytes** and `DE AA FF FF`. Validate the header/target against the previously presented stored address. Copy the **data header + 703 codewords** into the selected in-RAM record, rebuild/correct only the standard field's known generated sync/padding/gap, then atomically publish the updated RAM track. **No exact physical flux-splice recording is required** for standard tracks; preserve every other sector record and the complete existing 10-byte address header.
 
-**[OPEN — RAW_TRACK]** For untouched packed-bit nonstandard tracks, a literal bit-cell splice or explicitly unsupported-write policy must be designed separately. Do not rewrite copy-protected or unusual tracks into standard layout merely because they contain familiar markers. Hardware proof is needed for first/last WR cells, timing tolerance, truncation and race-free stream publication.
+**[DECISION — RAW_TRACK scope]** RAW_TRACK reading and writing are **not required in the first release** (Part 6 §14). The reserved representation is rejected rather than spliced, converted or silently normalized. Hardware proof is still required for first/last WR cells, timing tolerance, truncation and race-free publication on supported standard tracks.
 
 ### 12.10 Whole-track formatting and first-use blank media
 
@@ -297,7 +297,7 @@ VALIDATE / BUILD
          replace data header + codewords in existing structured record.
     Format: validate sector array, stored address/data headers, order/count,
          accepted gap and seam; reconstruct whole cyclic RAM track.
-    RAW_TRACK: preserve exact raw representation or explicit unsupported case.
+    RAW_TRACK: reject unsupported representation in first release.
     Publish a coherent RAM generation for immediate readback only if valid.
 
 ASYNC FLASH WORKER
@@ -351,7 +351,7 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 | **Sony T3/T4 guards** | First edge and last edge placed/recognized relative to gate per §3.4.5.1; no invented external /ERASE |
 | **IWM asynchronous handshake** | Correct ROM 6-and-2 encoded serial stream; host sees no spurious buffer underrun due to emulator behavior |
 | **First normal sector write** | Correct address field remains unchanged; only selected sector data region changes; readback succeeds |
-| **Other sectors preserved** | All non-target encoded sector records and address fields unchanged; generated standard sync/gap may be rebuilt deterministically; RAW_TRACK is replayed verbatim |
+| **Other sectors preserved** | All non-target encoded sector records and address fields unchanged; generated standard sync/gap may be rebuilt deterministically; unsupported RAW_TRACK is not mounted or modified |
 | **Both sides** | Head/side selection and the active write target remain consistent under normal writes |
 | **Different normal sectors** | Several sectors updated on the same track without requiring a track change or full track rewrite by ROM |
 | **Write phase offset** | Vary gate/first-edge phase; structural data-field replacement finds same encoded target without shifting or damaging adjacent headers |
@@ -377,7 +377,7 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 
 - **[SONY]** WR uses both rising/falling **level transitions** for recorded ones; RD emits pulses. Qualify active-low /WRREQ, media selection and protection; do not confuse internal erase-head timing with a host signal.
 - **[ROM]** Ordinary `Sony_WrData` starts with one SYNC6 and writes a data field only; format `SONY_DOFORMAT` starts with 200 consecutive SYNC6 then all sectors. The STM32 uses **>=50 consecutive groups** as an *early candidate format* trigger, not final acceptance.
-- **[DECISION]** Standard cartridge representation: **32-byte sector metadata retaining complete address/data headers + 703 unchanged encoded data/checksum codewords**; full cyclic standard sync/gaps/fixed pads are regenerated in RAM. Nonstandard RAW_TRACK remains an alternative bit-packed representation.
+- **[DECISION]** Standard cartridge representation: **32-byte sector metadata retaining complete address/data headers + 703 unchanged encoded data/checksum codewords**; full cyclic standard sync/gaps/fixed pads are regenerated in RAM. RAW_TRACK is a reserved **future** bit-packed representation, **not implemented in first-release firmware**.
 - **[DECISION]** At least **three independent >=12-KiB complete-track buffers** plus separate capture rings; structured replacement for normal sector writes; async flash worker, cache generation pinning and immediate RAM readback.
 - **[DECISION]** Erase-aligned standard extents (three 4-KiB erase units for 12-sector tracks, two for 8–11), versioned/extendible per-track directory and **one global** calibration. 2-MiB is the target flash size; reference worst-case internal flash operation budgets in §12.14.
 - **[DECISION]** No artificial mechanical delays; continuous cyclic RD, ROM-compatible electrical timing/TACH, safe eject and durable accepted writes remain required.
@@ -388,12 +388,14 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 - Candidate 32-byte sector-field offsets/CRC algorithm (not a frozen binary ABI).
 - Read-to-write address phase and source timing; **hardware qualification** of the agreed ROM-compatible gap/seam reconstruction and immediate first-format readback (Part 5 §13).
 - Exact flash transaction/journal/atomicity, interrupted formatting/ordinary writes, worst-case backlogs and power-cut recovery.
-- RAW_TRACK nonstandard write-splice support (no silent normalization), external importer fidelity and host-to-host calibration transfer.
+- First-release rejects unsupported RAW_TRACK rather than implementing raw bit splices; external importer fidelity/absent-tag policy and host-to-host calibration transfer remain separate tasks.
 - STM32 peripheral/SRAM scheduling, 2-MiB allocation including directory generations, spare blocks and wear.
 
 **Validation gates:** original Plus 20-pin hardware and [Apple 699-0452-A](https://mirrors.apple2.org.za/www.bitsavers.org/pdf/apple/disk/sony/MP-F51_specs/669-0452-A_800K_Double-Sided_ERS_Sep86.pdf) for gate/WR/RD timing; ROM full-format + immediate sector-0 readback, 400K/800K side/zone changes, multiple sector overwrites, sustained formatting with three buffers, interrupted/power-cut operations and external-programmer boot.
 
 **Document history**
+
+- **2026-11-09 (Section 14 scope update):** First-release firmware handles standard 400K/800K serial writes, format/retry, error/interrupt paths; RAW_TRACK read/write excluded and reserved for future. Three-buffer performance and crash recovery remain implementation gates.
 
 - **2026-11-09 (approved write architecture review):** Settled 32+703-byte structured encoded-GCR records with both stored headers, generated SYNC6/gaps/padding, alternate RAW_TRACK, >=3 complete 12-KiB track buffers, 50-SYNC6 early format detection, structural sector replacement, async flash worker and reference erase/program budget. Kept exact ABI, circular seam and crash-safe durability under validation.
 
