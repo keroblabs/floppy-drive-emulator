@@ -8,7 +8,7 @@
 **Preferred implementation:** STM32 (specific part/peripherals not yet selected)  
 **Date:** 9 November 2026
 
-> **Document split:** This is the continuation of [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **Numbering is intentionally continuous:** this file contains Section 10; **Section 11 (serial writing)** is reserved for **06 — Part 3**, which has **not** yet been created. Sections 12–17 remain on the protocol roadmap.
+> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. The shared decisions on raw-GCR media, SYNC6 calibration, logical track metadata, TACH and cartridge programming are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed **serial writing is planned for 06 — Part 4 / Section 12**; later sections are **13–18**.
 >
 > **Design rule:** Emulate the *electrical and logical* read interface, **not** spinning hardware, sounds, seek time or motor inertia. Yet the IWM still expects correctly timed **serial pulse patterns** and recognizes recorded fields as they arrive. Do not mistake “no mechanical rotational latency” for permission to output whole bytes instantly or substitute a static status value for disk data.
 
@@ -95,7 +95,7 @@ This **bit 7** is a property of the IWM's read-data register, **not an extra RD 
 | **T1** | **0.5 µs maximum** | RD-valid timing with /READY in the drawing; exact edge association must be checked against the figure |
 | **T2** | **100 µs maximum** | Data switching/validity during head/SEL transition; exact edge association requires diagram-level validation |
 | **T3** | **620 µs maximum** | Data resumption associated with write-gate transition; exact edge association requires diagram-level validation |
-| **T6** | **100 µs minimum** | Specified SEL/write-gate separation in diagram; validate exact sequencing when integrating Part 3 |
+| **T6** | **100 µs minimum** | Specified SEL/write-gate separation in diagram; validate exact sequencing when integrating future Part 4 / Section 12 |
 
 **[IWM]** Apple's *SWIM Chip User's Reference* uses **2 µs per IWM GCR bit cell** in its fast-mode explanation. Thus `1` bits generate pulses and `0` bits do not, producing **2, 4 or 6 µs nominal** intervals for valid GCR patterns. A continuously repeating *electrical level* is not the code stream; discrete pulses represent flux transitions.
 
@@ -234,7 +234,7 @@ This is **physical stream order**, not the numeric order of logical 512-byte blo
 - Keep the **five encoded header values, sector-ID byte, data payload and checksums** in their existing raw-GCR representation. Generating `SYNC6` must **not** require re-encoding the 6-and-2 data in the time-critical read path.
 - Use a **validated track map** (track/side, bit positions, address/data sync regions, and stream length) when generating/replacing sync. Do **not** find and overwrite arbitrary `FF` runs: `FF` may be legitimate GCR data.
 - Preserve the chosen **cyclic track duration**, all field prologues, and correct interleave. Do **not** append the 200 format-time lead-in groups to a finished track.
-- **Never silently normalize unknown/nonstandard raw tracks.** Copy-protected layouts, deliberately unusual gaps, write splices and partially formatted media may depend on noncanonical content; replay raw bits unless a normalizing policy is explicitly selected. The exact rules for accepting a track after format and merging later sector writes belong to **Part 3 / Section 11**.
+- **Never silently normalize unknown/nonstandard raw tracks.** Copy-protected layouts, deliberately unusual gaps, write splices and partially formatted media may depend on noncanonical content; replay raw bits unless a normalizing policy is explicitly selected. The shared policy is in **Part 3 / Section 11**; the exact rules for format capture and merging later writes belong to **Part 4 / Section 12**.
 
 **[OPEN]** Define the final physical-to-virtual track seam, the representable gap-length ranges, whether to retain captured post-format write-splice bits, and how/when a standard-track map is marked valid. Verify the byte stream against Macintosh Plus formatting and subsequent readback with a logic analyser. **Readback acceptance** requires the IWM/ROM to recover `D5 AA 96`, all five valid header values, `DE AA`, then `D5 AA AD`, the sector ID, decoded zero tags/data and correct checksums at every zone.
 
@@ -256,7 +256,7 @@ There are **80 tracks per side** and **800 sectors per side**, therefore **1600 
 
 **[DECISION]** Use a logically **cyclic, continuous track stream** for each selected radial track and side. After the final encoded bit cell, wrap to the first bit cell without producing a false sync/mark or illegal long zero gap. When the selected track or side changes, switch the backing stream coherently and satisfy /READY before advertising a new valid stream. One can choose an arbitrary *initial virtual phase* (no physical rotational-latency simulation required), but once running the stream must behave like a valid ongoing sequence, including gaps and wraparound.
 
-**Cross-check with TACH (Part 1 `8):** For a given zone, the emulated TACH rate is **60 pulses per virtual revolution**, so its pulse frequency numerically equals the nominal RPM value in hertz. Its rate and read-stream track duration must be **mutually consistent**. A drive that reports the correct tachometer yet emits the wrong zone's sector timing may confuse ROM speed checks.
+**Cross-check with TACH (Part 1 §8; Part 3 §11):** The Plus ROM **does read TACH even for 800K drives**. For a standard track, the STM32 derives the target TACH frequency from the **logical track descriptor's sector count** (12→394 Hz, 11→429 Hz, 10→472 Hz, 9→525 Hz, 8→590 Hz); this is an electrical compatibility lookup, **not a physical motor simulation or a second GCR calibration**. The entire raw-GCR stream continues at the **single global bit-cell rate**. Ensure the resulting TACH rate and cyclic track duration are acceptably coherent.
 
 **Engineering estimate, not a buffer commitment:** A rate of about **489.6 kbit/s** corresponds to **61.2 kB/s**. A revolution thus holds roughly **9.3 kB** worth of bit cells on the outermost zone or **6.2 kB** on the innermost; these totals include sync/gaps and are not synonymous with user-sector storage size. One complete currently selected *encoded* track could therefore plausibly fit in approximately **10 KiB** of bit-packed storage, plus buffering/metadata. Actual worst-case buffering, head changes and phase scheduling remain for measurement.
 
@@ -322,7 +322,7 @@ Unknown/nonstandard raw tracks bypass canonical sync replacement. An ordinary re
 - **At step or side change:** Prevent data from being falsely advertised as ready while a prior side/track's stream is still installed. Install the new stream and corresponding zone timing, then assert ready.
 - **At status selection:** RD must present the selected status; *the stream clock need not be restarted merely because the host momentarily reads status*. Preserve sensible phase continuity where feasible.
 - **At head-data selection:** Deliver the current selected stream, not a fixed level, and do not treat SEL itself as a command strobe.
-- **At write gate:** A true drive suppresses/replaces read data during writing and resumes subject to source timing. Exact gate-to-read resumption is part of **Part 3/Section 11**; the read generator must expose suitable pause/resume/handoff hooks.
+- **At write gate:** A true drive suppresses/replaces read data during writing and resumes subject to source timing. Exact gate-to-read resumption is part of **future Part 4 / Section 12**; the read generator must expose suitable pause/resume/handoff hooks.
 - **At eject / cartridge removal / fault:** Stop exposing old disk data; mark logically not ready and absent as appropriate (Part 1 `9).
 - **At end of encoded track:** Repeat the valid bitstream seamlessly. Avoid injecting fake index pulses: the Sony common interface has no separate index pin and the GCR read path uses field marks to find sectors.
 
@@ -343,7 +343,7 @@ Unknown/nonstandard raw tracks bypass canonical sync replacement. An ordinary re
 | Data-source and status multiplexer | **Yes (≤0.5 µs source timing)** | Verified fast hardware mux / GPIO+buffer, subject to bench measurement |
 | RD output-disable on `/ENBL` high | **Yes (≤0.5 µs)** | Prefer asynchronous hardware output-enable gating if needed |
 | Tachometer signal (Part 1 `8) | Yes | Independent hardware timer, common zone model |
-| Write-data capture (future Part 3) | Yes | To be investigated separately; cannot assume read timer is shareable |
+| Write-data capture (future Part 4 / §12) | Yes | To be investigated separately; cannot assume read timer is shareable |
 
 A CPU-driven interrupt for *every GCR transition* may approach hundreds of thousands of events per second at worst, leaving little deterministic time for other work. **This is a workload warning, not a proven STM32 failure.** We should evaluate DMA-assisted timer updates or a small external timing/mux stage before approving a part.
 
@@ -408,14 +408,14 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 
 **Established now:**
 
-- **[DECISION]** Section 10 is the only numbered protocol operation in **06 — Part 2**.
+- **[DECISION]** Section 10 is the only numbered protocol operation in **06 — Part 2**. See **[Part 3 / Section 11](06-part-3-media-architecture.md)** for the common cartridge/timing/metadata architecture and future Part 4 / Section 12 for serial write capture.
 - **[DECISION]** The STM32 generates genuine GCR-like **RD electrical pulses** through the unchanged Macintosh IWM.
-- **[DECISION]** One shared virtual track/zone model must agree with Part 1's TACH and /READY.
+- **[DECISION]** One logical-track metadata model (sector count, valid bit length) and **single global GCR calibration** must agree with Part 1's TACH and /READY. The STM32 does not model a physical motor or maintain five separate GCR clocks.
 - **[DECISION]** Cartridge storage is **bit-packed raw GCR**; the STM32 may generate **canonical 48-bit SYNC6** internally in mapped standard-track sync regions, without re-encoding sector payloads or silently modifying nonstandard tracks.
 - **[ROM]** Fresh format detail is specified in `10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
-- **[DECISION]** Leave write capture/erase/write-gate timing for **06 — Part 3, Section 11**.
+- **[DECISION]** Leave write capture/erase/write-gate timing for **06 — Part 4, Section 12**.
 
 **Research/implementation gates before hardware selection:**
 
@@ -427,9 +427,10 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 6. Validate **fresh-format stream and raw playback** against known ROM fixtures (including 200 transient lead-in groups, `GapSync` adjustment, both prologues, pads, checksums, slip marks and byte-boundary recovery); no routine payload re-encoding in STM32 is assumed.
 7. Measure **worst-case timer/DMA jitter, CPU loading, memory footprint and SPI flash stalls** for candidate STM32 devices.
 8. Determine exact behaviours for **unformatted media, write splice, speed-zone transition during active output and drive re-enable**.
-9. Define the final boundary between **Part 2 read engine** and **Part 3 write capture**, including ownership of the RD output, track buffers, and persistent data.
+9. Define the final boundary between **Part 2 read engine**, **Part 3 shared media state**, and **Part 4 write capture**, including ownership of RD, track buffers and persistence.
 
 **Document history**
 
+- **2026-11-09:** Linked new **Part 3 / §11** shared cartridge/timing/metadata contract; moved the planned detailed writing section to **Part 4 / §12** and roadmap to §§13–18. Clarified logical sector-count-to-TACH lookup versus the common GCR clock.
 - **2026-11-09:** Expanded `10.6` with the exact **freshly formatted GCR write stream** as a read-side reference; fixed address/data pad/gap details, `GapSync`, transient 200-group lead-in and 2:1 interleave. Settled STM32 **canonical sync generation for mapped standard tracks**, preserving raw-GCR flash storage and nonstandard-track replay. Updated chosen **489,600 bit/s** timing baseline; bench measurement remains pending.
-- **2026-11-09:** Created **06 — Part 2**, giving Section 10 its own research and implementation specification. Original **06** split into **06 — Part 1** (Sections 1–9); future Section 11 assigned to **06 — Part 3**. Timing and storage design deliberately remain under verification.
+- **2026-11-09:** Created **06 — Part 2**, giving Section 10 its own research and implementation specification. Original **06** split into **06 — Part 1** (Sections 1–9); future serial-write section was originally assigned to Part 3 (subsequently moved to Part 4 / §12 after the shared architecture part was inserted). Timing and storage design deliberately remain under verification.
