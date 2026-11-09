@@ -6,7 +6,7 @@
 **Target:** Macintosh Plus M0001AP, original Plus ROM `.Sony` driver, IWM and host-facing Sony MFD-51W 800K interface  
 **Date:** 9 November 2026
 
-> **Position in the series:** [Part 1 / ``1–9](06-part-1-drive-interface.md) defines drive/status/control/eject and TACH; [Part 2 / `10](06-part-2-serial-gcr-read.md) defines the exact serial GCR stream and RD waveform; [Part 3 / `11](06-part-3-media-architecture.md) establishes the 32+703-byte sector records, RAW_TRACK alternative, global calibration and >=3 track buffers; [Part 4 / `12](06-part-4-serial-gcr-write.md) defines electrical WR capture, early format detection and asynchronous flash persistence. This part specifies **the complete standard logical track that those engines must reconstruct**. It does not repeat the electrical write protocol.
+> **Position in the series:** [Part 1 / §§1–9](06-part-1-drive-interface.md) defines drive/status/control/eject and TACH; [Part 2 / §10](06-part-2-serial-gcr-read.md) defines the exact serial GCR stream and RD waveform; [Part 3 / §11](06-part-3-media-architecture.md) establishes the 32+703-byte sector records, RAW_TRACK alternative, global calibration and >=3 track buffers; [Part 4 / §12](06-part-4-serial-gcr-write.md) defines electrical WR capture, early format detection and asynchronous flash persistence. This part specifies **the complete standard logical track that those engines must reconstruct**. It does not repeat the electrical write protocol.
 
 **Evidence notation:** **[ROM]** directly established by Plus ROM source; **[DECISION]** agreed emulator requirement; **[REFERENCE]** engineering computation from agreed reference values; **[OPEN]** implementation measurement or error/recovery detail, not a reopened disk-format decision.
 
@@ -96,7 +96,7 @@ These are **decoded six-bit format values**; the byte physically stored in the a
 | 9 sectors | `0 5 1 6 2 7 3 8 4` |
 | 8 sectors | `0 4 1 5 2 6 3 7` |
 
-**[ROM]** The normal `Sony_ReSeek` read/write path scans valid address fields and consults a **logical sector-number bitmask**; it does not require the next recorded sector to have a particular ID. Therefore **ordering is not sector identity**.
+**[ROM]** The normal `Sony_ReSeek` read/write path scans valid address fields and consults a **logical sector-number bitmask**; it does not require the next recorded sector to have a particular ID. Therefore **ordering is not sector identity**. [ROM sector scanning, lines 888–1012](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L888-L1012).
 
 **[DECISION]** Preserve the **observed or imported physical sequence** of valid structured sectors, even if it is not the ROM formatter's normal 2:1 permutation. This is a storage/reconstruction capability, **not** a claim that the Plus formatter itself dynamically changes its interleave. Rotate a valid physical sequence so **sector 0 is first in the logical circular buffer**, keeping all **relative successor relationships** unchanged. Every sector record stores its original encoded sector ID and is associated with a physical-order/index value; the exact byte offsets inside the 32-byte metadata remain a future ABI detail.
 
@@ -175,7 +175,7 @@ build sector-ID → bit-position table; verify circular wrap and capacity
 atomically publish complete RAM generation to RD scheduler
 ~~~
 
-The standard builder owns **sector placement**, not the address/data checksum values. The read engine owns serial pulses, not sector-data synthesis. A dirty sector rewrite replaces only the relevant preserved data header and 703 codewords before rebuilding/publishing a coherent track generation (Part 4 `12).
+The standard builder owns **sector placement**, not the address/data checksum values. The read engine owns serial pulses, not sector-data synthesis. A dirty sector rewrite replaces only the relevant preserved data header and 703 codewords before rebuilding/publishing a coherent track generation (Part 4 §12).
 
 ### 13.7 Circular buffer, standard gaps, length and playback phase
 
@@ -230,7 +230,7 @@ Source: [Plus ROM formatting and gap fit, lines 2755–2804 and 2883–3078](htt
 
 **[DECISION]** STM32 need not recreate the mechanical way a disk physically overwrites part of its lead-in. It receives/validates the ROM's known encoded fields and reconstructs the **ROM-acceptable logical result**. The last-to-first sync seam and RD phase **must actually allow the ROM to read sector 0 and perform its gap check**; success must not be faked by an internal software acknowledgment.
 
-**[DECISION]** The **>=50-consecutive-SYNC6** discriminator from Part 4 `12 triggers **candidate format preparation**, not automatic success. Completed valid headers/703-byte fields, the expected number of sectors, no missing duplicates, appropriate side/format value, and the track's accepted gap/profile are needed before publishing a **coherent RAM track**. The reconstructed track is available for the ROM's immediate readback even if SPI persistence is still pending. On a ROM reformat retry, **replace** the existing candidate track rather than append sectors.
+**[DECISION]** The **>=50-consecutive-SYNC6** discriminator from Part 4 §12 triggers **candidate format preparation**, not automatic success. Completed valid headers/703-byte fields, the expected number of sectors, no missing duplicates, appropriate side/format value, and the track's accepted gap/profile are needed before publishing a **coherent RAM track**. The reconstructed track is available for the ROM's immediate readback even if SPI persistence is still pending. On a ROM reformat retry, **replace** the existing candidate track rather than append sectors.
 
 **[DECISION]** The ROM's own gap adjustment is a legitimate *format attempt/retry*, not a reason to change standard geometry. The constructed track must faithfully produce a valid sector-0 return and gap observations; no invented delay or spindle-position simulator is required.
 
@@ -279,11 +279,11 @@ Source: [Plus ROM formatting and gap fit, lines 2755–2804 and 2883–3078](htt
 
 **Interface ownership:**
 
-- [Part 2 `10](06-part-2-serial-gcr-read.md): electrical RD pulses, bit ordering and byte synchronization.
-- [Part 3 `11](06-part-3-media-architecture.md): representation IDs, 735-byte records, descriptors, >=3 cache buffers, global calibration and allocation.
-- [Part 4 `12](06-part-4-serial-gcr-write.md): WR gate, both-edge capture, 50-SYNC6 classification, standard data-field replacement and SPI flush scheduling.
-- **This `13:** standard geometry, side/format semantics, physical ordering, fixed-format sector reconstruction, circular loop and ROM format/verify behaviour.
-- **Future `14:** errors, unusual sequences, interrupted operations and safe recovery.
+- [Part 2 §10](06-part-2-serial-gcr-read.md): electrical RD pulses, bit ordering and byte synchronization.
+- [Part 3 §11](06-part-3-media-architecture.md): representation IDs, 735-byte records, descriptors, >=3 cache buffers, global calibration and allocation.
+- [Part 4 §12](06-part-4-serial-gcr-write.md): WR gate, both-edge capture, 50-SYNC6 classification, standard data-field replacement and SPI flush scheduling.
+- **This §13:** standard geometry, side/format semantics, physical ordering, fixed-format sector reconstruction, circular loop and ROM format/verify behavior.
+- **Future §14:** errors, unusual sequences, interrupted operations and safe recovery.
 
 ### 13.12 Settled decisions and remaining engineering gates
 
