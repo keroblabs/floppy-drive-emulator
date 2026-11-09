@@ -6,7 +6,7 @@
 **Target:** Macintosh Plus M0001AP, original ROM `.Sony` driver and IWM, host-facing Sony MFD-51W 800K mechanism  
 **Date:** 9 November 2026
 
-> **Where this part fits:** [Part 1, Sections 1–9](06-part-1-drive-interface.md) documents the host-facing interface, commands, status and TACH; [Part 2, Section 10](06-part-2-serial-gcr-read.md) documents serial reading and the exact freshly formatted GCR track stream. **This Part 3, Section 11** is the common architecture used by **both** reading and writing. **[Part 4, Section 12](06-part-4-serial-gcr-write.md)** develops the detailed serial writing procedure; later topics begin at Section 13. This is **not** a replacement for either the read or write electrical specifications.
+> **Where this part fits:** [Part 1, Sections 1–9](06-part-1-drive-interface.md) documents the host-facing interface, commands, status and TACH; [Part 2, Section 10](06-part-2-serial-gcr-read.md) documents serial reading and the exact freshly formatted GCR track stream. **This Part 3, Section 11** is the common architecture used by **both** reading and writing. **[Part 4, Section 12](06-part-4-serial-gcr-write.md)** develops serial writing and **[Part 5, Section 13](06-part-5-format-geometry-400k.md)** establishes standard 400K/800K geometry, sector ordering and ROM-compatible track reconstruction; later topics begin at Section 14. This is **not** a replacement for either the read or write electrical specifications.
 >
 > **Evidence labels:** **[ROM]** observed Plus ROM assembly; **[SONY]** original drive specification; **[DECISION]** agreed project requirement; **[PROPOSED]** candidate implementation, not yet approved as a flash format or hardware design; **[OPEN]** requires engineering, hardware evidence, or a further decision.
 
