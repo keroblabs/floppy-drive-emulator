@@ -42,9 +42,9 @@ The common internal 20-pin drive connection carries **only one RD output** (pin 
 
 | Operation | Sony selected RD source | Macintosh IWM mode | What the 68000 sees |
 |---|---|---|---|
-| **Status reading** (Part 1 `4) | CSTIN, WRTPRT, READY, TK0, etc. | `Q7=0, Q6=1` | Sense/status value in bit 7 |
+| **Status reading** (Part 1 §4) | CSTIN, WRTPRT, READY, TK0, etc. | `Q7=0, Q6=1` | Sense/status value in bit 7 |
 | **Disk-data reading** (this Part 2) | **RDDATA0** or **RDDATA1** | `Q7=0, Q6=0` | IWM **assembled GCR nibble/byte**, with bit 7 used as the byte-complete indication |
-| **Control command** (Part 1 `6) | RD still carries whichever selector is active; write is **LSTRB** | IWM PH3 controls strobe | Drive accepts control on qualified LSTRB rising edge |
+| **Control command** (Part 1 §6) | RD still carries whichever selector is active; write is **LSTRB** | IWM PH3 controls strobe | Drive accepts control on qualified LSTRB rising edge |
 
 The STM32 **does not receive Q6/Q7 as connector signals**. It must present the correct time-varying RD output based on **CA0–CA2, SEL, /ENBL**, logical motor/readiness and its stream state; the IWM subsequently converts pulses into bytes in its own circuitry.
 
@@ -59,7 +59,7 @@ The STM32 **does not receive Q6/Q7 as connector signals**. It must present the c
 
 **[ROM]** [`Sony_RdAddrSetup`, lines 2094–2106](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2094-L2106) selects `RdDtaAdr` or `RdDta1Adr` according to bit 11 of the ROM's side/track variable; the low-level selector routine sets CA0–CA2 through the IWM and **SEL through VIA port A bit 5**.
 
-**[SONY]** **/ENBL.INT=0** is required to connect the selected drive output. When **/ENBL.INT=1**, RD is **high impedance** (the specified output-disable time is at most **0.5 µs**; see Part 1 and `10.4). No other drive-output GPIO should source RD.
+**[SONY]** **/ENBL.INT=0** is required to connect the selected drive output. When **/ENBL.INT=1**, RD is **high impedance** (the specified output-disable time is at most **0.5 µs**; see Part 1 and §10.4). No other drive-output GPIO should source RD.
 
 **[DECISION]** Switching sides changes which track-side stream is exposed on RD, **not** the virtual radial track number. If a side change occurs during a read, the stream must be redirected safely to the correct side; the RD mux must not simultaneously drive a static sense level and a GCR stream. The precise phase-coherence requirement between heads remains **[OPEN]**.
 
@@ -101,7 +101,7 @@ This **bit 7** is a property of the IWM's read-data register, **not an extra RD 
 
 **[DECISION — project timing baseline]:** Use **489,600 bit/s = 2.042484 µs per bit cell** as the nominal STM32 raw-GCR stream timing, pending a planned logic-analyser check on real hardware. The IWM/SWIM reference's rounded **2 µs** explanatory cell is not the selected implementation value. For example, nominal 1/2/3-cell transition intervals at our selected rate are approximately **2.042/4.085/6.127 µs**; keep the original Apple waveform/tolerance requirements for electrical acceptance.
 
-**[SONY]** Apple `3.4.1.1 (printed sheet **23**, PDF index 22) also gives **≤0.5 µs** for an enabled RD output to reflect an addressed signal change and **≤0.5 µs** to reach high impedance after disable. These are **electrical response requirements**, not permissions for arbitrarily high interrupt latency.
+**[SONY]** Apple §3.4.1.1 (printed sheet **23**, PDF index 22) also gives **≤0.5 µs** for an enabled RD output to reflect an addressed signal change and **≤0.5 µs** to reach high impedance after disable. These are **electrical response requirements**, not permissions for arbitrarily high interrupt latency.
 
 **[DECISION]** The eventual output path must meet pulse *edge placement* and *width* together, worst-case over sustained activity. DMA/timer or other deterministic hardware may be appropriate; an unproven ordinary GPIO polling loop is **not** an approved design.
 
@@ -226,7 +226,6 @@ At 489,600 bit/s: approximately 12.582 ms per entry (before any physical wrap)
 
 This is **physical stream order**, not the numeric order of logical 512-byte blocks presented to the operating system.
 
-
 #### 10.6.5 STM32 standard-track reconstruction — agreed read/storage policy
 
 **[DECISION]** Standard SPI NOR tracks comprise **735-byte sector records**: **32-byte metadata retaining the 10-byte GCR address field and 4-byte data header**, plus **703 preserved GCR codewords** (699 encoded tag/data + four encoded data checksums). STM32 constructs the **complete cyclic bitstream into a >=12-KiB RAM track buffer**; it does not normally decode/re-encode user data.
@@ -237,7 +236,7 @@ This is **physical stream order**, not the numeric order of logical 512-byte blo
 - Complete RAM reconstruction before RD becomes ready. Never change bit lengths mid-playback.
 - **RAW_TRACK** reads preserve bit-packed original data (including nonstandard gaps/sync/splices) without normalization.
 
-**[OPEN]** Verify accepted gap/seam, phase, nonstandard length and ROM sector-0 readback on hardware. Part 3 `11 defines structured and raw persistence.
+**[OPEN]** Verify accepted gap/seam, phase, nonstandard length and ROM sector-0 readback on hardware. Part 3 §11 defines structured and raw persistence.
 
 ### 10.7 The five zones and track wrapping
 
@@ -290,7 +289,6 @@ Relevant ROM-side errors include:
 
 **[DECISION]** Our normal bootable/format-correct media path must generate a complete, self-consistent stream, not merely avoid `noNybErr`. Blank-media and image-corruption behaviour should be defined consciously, with the ROM's retry/format path evaluated, rather than masking all errors as success.
 
-
 ### 10.9 Streaming model, transitions and storage interaction
 
 **[DECISION]** Distinguish flash records from the fully prepared cyclic read stream:
@@ -312,7 +310,7 @@ Hardware-timed pulse scheduler → RD/status/TACH mux → IWM
 
 **[DECISION]** Buffer roles are dynamic (readable/active, receiving/reconstructing, dirty/flushing), with separate WR edge-capture DMA rings. Read-after-write uses the published RAM generation while persistence proceeds asynchronously. Do not reuse a buffer holding the only dirty or active copy; do not stall an advertised-ready RD stream on flash.
 
-**State expectations:** motor-on/track selection becomes ready when the correct stream is installed (no artificial delays); cache hits can avoid SPI reads; source/status selection need not restart phase; write gate obeys Part 4 `12; removal/eject/fault hides old data and honors pending dirty writes; wrap at valid bit length without an invented index marker.
+**State expectations:** motor-on/track selection becomes ready when the correct stream is installed (no artificial delays); cache hits can avoid SPI reads; source/status selection need not restart phase; write gate obeys Part 4 §12; removal/eject/fault hides old data and honors pending dirty writes; wrap at valid bit length without an invented index marker.
 
 **[OPEN]** Measure read/source-mux timing, phase continuity, cache pressure and flash worker interactions.
 
@@ -328,7 +326,7 @@ Hardware-timed pulse scheduler → RD/status/TACH mux → IWM
 | **Pulse rise and fall (0.3–0.8 µs wide)** | **Yes** | Timer output compare / DMA event stream / external gating |
 | Data-source and status multiplexer | **Yes (≤0.5 µs source timing)** | Verified fast hardware mux / GPIO+buffer, subject to bench measurement |
 | RD output-disable on `/ENBL` high | **Yes (≤0.5 µs)** | Prefer asynchronous hardware output-enable gating if needed |
-| Tachometer signal (Part 1 `8) | Yes | Independent hardware timer, common zone model |
+| Tachometer signal (Part 1 §8) | Yes | Independent hardware timer, common zone model |
 | Write-data capture (Part 4 / §12) | Yes | Both-edge WR timer capture and gated transfer; exact peripherals/splice still to be designed |
 
 A CPU-driven interrupt for *every GCR transition* may approach hundreds of thousands of events per second at worst, leaving little deterministic time for other work. **This is a workload warning, not a proven STM32 failure.** We should evaluate DMA-assisted timer updates or a small external timing/mux stage before approving a part.
@@ -401,7 +399,7 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 - **[DECISION]** The STM32 generates genuine GCR-like **RD electrical pulses** through the unchanged Macintosh IWM.
 - **[DECISION]** One logical-track metadata model (sector count, valid bit length) and **single global GCR calibration** must agree with Part 1's TACH and /READY. The STM32 does not model a physical motor or maintain five separate GCR clocks.
 - **[DECISION]** Standard storage is **32-byte sector metadata + 703 encoded GCR bytes**, preserving address/data headers; STM32 reconstructs full standard gaps/SYNC6/padding in >=3 complete >=12-KiB RAM buffers. Optional RAW_TRACK keeps nonstandard packed bits untouched.
-- **[ROM]** Fresh format detail is specified in `10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
+- **[ROM]** Fresh format detail is specified in §10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
 - **[DECISION]** Write capture, Sony gate/erase timing, sector writes, format and unresolved splices are specified in **[06 — Part 4, Section 12](06-part-4-serial-gcr-write.md)**.
@@ -424,5 +422,5 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 
 - **2026-11-09:** Linked completed [Part 4 / §12](06-part-4-serial-gcr-write.md) for both-edge WR capture, gate timing and read/write handoff; this read document remains authoritative for RD and fresh-format track reference.
 - **2026-11-09:** Linked new **Part 3 / §11** shared cartridge/timing/metadata contract; moved the planned detailed writing section to **Part 4 / §12** and roadmap to §§13–18. Clarified logical sector-count-to-TACH lookup versus the common GCR clock.
-- **2026-11-09:** Expanded `10.6` with the exact **freshly formatted GCR write stream** as a read-side reference; fixed address/data pad/gap details, `GapSync`, transient 200-group lead-in and 2:1 interleave. Settled STM32 **canonical sync generation for mapped standard tracks**, preserving raw-GCR flash storage and nonstandard-track replay. Updated chosen **489,600 bit/s** timing baseline; bench measurement remains pending.
+- **2026-11-09:** Expanded `10.6` with the exact **freshly formatted GCR write stream** as a read-side reference; fixed address/data pad/gap details, `GapSync`, transient 200-group lead-in and 2:1 interleave. Settled STM32 **canonical sync generation for mapped standard tracks**, (historical policy, superseded by the 32+703 structured-GCR mode), while retaining nonstandard raw-track replay. Updated chosen **489,600 bit/s** timing baseline; bench measurement remains pending.
 - **2026-11-09:** Created **06 — Part 2**, giving Section 10 its own research and implementation specification. Original **06** split into **06 — Part 1** (Sections 1–9); future serial-write section was originally assigned to Part 3 (subsequently moved to Part 4 / §12 after the shared architecture part was inserted). Timing and storage design deliberately remain under verification.
