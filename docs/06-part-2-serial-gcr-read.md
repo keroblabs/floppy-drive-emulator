@@ -95,7 +95,7 @@ This **bit 7** is a property of the IWM's read-data register, **not an extra RD 
 | **T1** | **0.5 µs maximum** | RD-valid timing with /READY in the drawing; exact edge association must be checked against the figure |
 | **T2** | **100 µs maximum** | Data switching/validity during head/SEL transition; exact edge association requires diagram-level validation |
 | **T3** | **620 µs maximum** | Data resumption associated with write-gate transition; exact edge association requires diagram-level validation |
-| **T6** | **100 µs minimum** | Specified SEL/write-gate separation in diagram; validate exact sequencing when integrating future Part 4 / Section 12 |
+| **T6** | **100 µs minimum** | Specified SEL/write-gate separation in diagram; final interpretation to be validated with [Part 4 / Section 12](06-part-4-serial-gcr-write.md) electrical integration |
 
 **[IWM]** Apple's *SWIM Chip User's Reference* uses **2 µs per IWM GCR bit cell** in its fast-mode explanation. Thus `1` bits generate pulses and `0` bits do not, producing **2, 4 or 6 µs nominal** intervals for valid GCR patterns. A continuously repeating *electrical level* is not the code stream; discrete pulses represent flux transitions.
 
