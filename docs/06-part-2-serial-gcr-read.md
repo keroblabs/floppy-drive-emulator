@@ -8,7 +8,7 @@
 **Preferred implementation:** STM32 (specific part/peripherals not yet selected)  
 **Date:** 9 November 2026
 
-> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. The shared decisions on raw-GCR media, SYNC6 calibration, logical track metadata, TACH and cartridge programming are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is developed in **[06 — Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; later sections are **13–18**.
+> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. Structured-GCR sector records plus raw-track compatibility, SYNC6 calibration, logical track metadata and TACH are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is in **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; format geometry, standard reconstruction and 400K compatibility are in **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)**. Later sections are **14–18**.
 >
 > **Design rule:** Emulate the *electrical and logical* read interface, **not** spinning hardware, sounds, seek time or motor inertia. Yet the IWM still expects correctly timed **serial pulse patterns** and recognizes recorded fields as they arrive. Do not mistake “no mechanical rotational latency” for permission to output whole bytes instantly or substitute a static status value for disk data.
 
