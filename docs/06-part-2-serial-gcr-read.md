@@ -8,7 +8,7 @@
 **Preferred implementation:** STM32 (specific part/peripherals not yet selected)  
 **Date:** 9 November 2026
 
-> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. The shared decisions on raw-GCR media, SYNC6 calibration, logical track metadata, TACH and cartridge programming are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed **serial writing is planned for 06 — Part 4 / Section 12**; later sections are **13–18**.
+> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. The shared decisions on raw-GCR media, SYNC6 calibration, logical track metadata, TACH and cartridge programming are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is developed in **[06 — Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; later sections are **13–18**.
 >
 > **Design rule:** Emulate the *electrical and logical* read interface, **not** spinning hardware, sounds, seek time or motor inertia. Yet the IWM still expects correctly timed **serial pulse patterns** and recognizes recorded fields as they arrive. Do not mistake “no mechanical rotational latency” for permission to output whole bytes instantly or substitute a static status value for disk data.
 
@@ -322,7 +322,7 @@ Unknown/nonstandard raw tracks bypass canonical sync replacement. An ordinary re
 - **At step or side change:** Prevent data from being falsely advertised as ready while a prior side/track's stream is still installed. Install the new stream and corresponding zone timing, then assert ready.
 - **At status selection:** RD must present the selected status; *the stream clock need not be restarted merely because the host momentarily reads status*. Preserve sensible phase continuity where feasible.
 - **At head-data selection:** Deliver the current selected stream, not a fixed level, and do not treat SEL itself as a command strobe.
-- **At write gate:** A true drive suppresses/replaces read data during writing and resumes subject to source timing. Exact gate-to-read resumption is part of **future Part 4 / Section 12**; the read generator must expose suitable pause/resume/handoff hooks.
+- **At write gate:** A true drive suppresses/replaces read data during writing and resumes subject to source timing. Exact gate-to-read resumption is analyzed in **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; the read generator must expose suitable pause/resume/handoff hooks.
 - **At eject / cartridge removal / fault:** Stop exposing old disk data; mark logically not ready and absent as appropriate (Part 1 `9).
 - **At end of encoded track:** Repeat the valid bitstream seamlessly. Avoid injecting fake index pulses: the Sony common interface has no separate index pin and the GCR read path uses field marks to find sectors.
 
@@ -343,7 +343,7 @@ Unknown/nonstandard raw tracks bypass canonical sync replacement. An ordinary re
 | Data-source and status multiplexer | **Yes (≤0.5 µs source timing)** | Verified fast hardware mux / GPIO+buffer, subject to bench measurement |
 | RD output-disable on `/ENBL` high | **Yes (≤0.5 µs)** | Prefer asynchronous hardware output-enable gating if needed |
 | Tachometer signal (Part 1 `8) | Yes | Independent hardware timer, common zone model |
-| Write-data capture (future Part 4 / §12) | Yes | To be investigated separately; cannot assume read timer is shareable |
+| Write-data capture (Part 4 / §12) | Yes | Both-edge WR timer capture and gated transfer; exact peripherals/splice still to be designed |
 
 A CPU-driven interrupt for *every GCR transition* may approach hundreds of thousands of events per second at worst, leaving little deterministic time for other work. **This is a workload warning, not a proven STM32 failure.** We should evaluate DMA-assisted timer updates or a small external timing/mux stage before approving a part.
 
@@ -408,14 +408,14 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 
 **Established now:**
 
-- **[DECISION]** Section 10 is the only numbered protocol operation in **06 — Part 2**. See **[Part 3 / Section 11](06-part-3-media-architecture.md)** for the common cartridge/timing/metadata architecture and future Part 4 / Section 12 for serial write capture.
+- **[DECISION]** Section 10 is the only numbered protocol operation in **06 — Part 2**. See **[Part 3 / Section 11](06-part-3-media-architecture.md)** for the common cartridge/timing/metadata architecture and [Part 4 / Section 12](06-part-4-serial-gcr-write.md) for serial write capture.
 - **[DECISION]** The STM32 generates genuine GCR-like **RD electrical pulses** through the unchanged Macintosh IWM.
 - **[DECISION]** One logical-track metadata model (sector count, valid bit length) and **single global GCR calibration** must agree with Part 1's TACH and /READY. The STM32 does not model a physical motor or maintain five separate GCR clocks.
 - **[DECISION]** Cartridge storage is **bit-packed raw GCR**; the STM32 may generate **canonical 48-bit SYNC6** internally in mapped standard-track sync regions, without re-encoding sector payloads or silently modifying nonstandard tracks.
 - **[ROM]** Fresh format detail is specified in `10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
-- **[DECISION]** Leave write capture/erase/write-gate timing for **06 — Part 4, Section 12**.
+- **[DECISION]** Write capture, Sony gate/erase timing, sector writes, format and unresolved splices are specified in **[06 — Part 4, Section 12](06-part-4-serial-gcr-write.md)**.
 
 **Research/implementation gates before hardware selection:**
 
@@ -427,10 +427,11 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 6. Validate **fresh-format stream and raw playback** against known ROM fixtures (including 200 transient lead-in groups, `GapSync` adjustment, both prologues, pads, checksums, slip marks and byte-boundary recovery); no routine payload re-encoding in STM32 is assumed.
 7. Measure **worst-case timer/DMA jitter, CPU loading, memory footprint and SPI flash stalls** for candidate STM32 devices.
 8. Determine exact behaviours for **unformatted media, write splice, speed-zone transition during active output and drive re-enable**.
-9. Define the final boundary between **Part 2 read engine**, **Part 3 shared media state**, and **Part 4 write capture**, including ownership of RD, track buffers and persistence.
+9. Define the final boundary between **Part 2 read engine**, **Part 3 shared media state**, and **[Part 4 write capture](06-part-4-serial-gcr-write.md)**, including ownership of RD, track buffers and persistence.
 
 **Document history**
 
+- **2026-11-09:** Linked completed [Part 4 / §12](06-part-4-serial-gcr-write.md) for both-edge WR capture, gate timing and read/write handoff; this read document remains authoritative for RD and fresh-format track reference.
 - **2026-11-09:** Linked new **Part 3 / §11** shared cartridge/timing/metadata contract; moved the planned detailed writing section to **Part 4 / §12** and roadmap to §§13–18. Clarified logical sector-count-to-TACH lookup versus the common GCR clock.
 - **2026-11-09:** Expanded `10.6` with the exact **freshly formatted GCR write stream** as a read-side reference; fixed address/data pad/gap details, `GapSync`, transient 200-group lead-in and 2:1 interleave. Settled STM32 **canonical sync generation for mapped standard tracks**, preserving raw-GCR flash storage and nonstandard-track replay. Updated chosen **489,600 bit/s** timing baseline; bench measurement remains pending.
 - **2026-11-09:** Created **06 — Part 2**, giving Section 10 its own research and implementation specification. Original **06** split into **06 — Part 1** (Sections 1–9); future serial-write section was originally assigned to Part 3 (subsequently moved to Part 4 / §12 after the shared architecture part was inserted). Timing and storage design deliberately remain under verification.
