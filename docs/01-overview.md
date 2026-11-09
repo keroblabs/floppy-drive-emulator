@@ -48,7 +48,7 @@ The preferred storage design is a **3D-printed, 3.5-inch floppy-shaped cartridge
 - The cartridge provides removable, non-volatile disk-image storage.
 - The emulator translates drive-level reads and writes into storage operations; the Macintosh need not be aware of SPI flash.
 - An SD-card media path is **not part of the current preferred concept**.
-- **16 Mbit / 2 MiB SPI NOR** is the current capacity target. **Standard tracks use structured encoded-GCR records (32 metadata bytes preserving the encoded address/data headers + 703 GCR data/checksum bytes per sector)**; complete cyclic tracks, SYNC6 and gaps are reconstructed in RAM. **RAW_TRACK** remains an exact bit-packed alternative for nonstandard media. The design requires **at least three >=12-KiB complete-track RAM buffers**, one global timing calibration, logical track descriptors and extensible, migratable metadata.
+- **16 Mbit / 2 MiB SPI NOR** is the current capacity target. **Standard tracks use structured encoded-GCR records (32 metadata bytes preserving the encoded address/data headers + 703 GCR data/checksum bytes per sector)**; complete cyclic tracks, SYNC6 and gaps are reconstructed in RAM. A **RAW_TRACK identifier is reserved for possible future nonstandard support**, but RAW_TRACK read/write is **not required in the first firmware**. The design requires **at least three >=12-KiB complete-track RAM buffers**, one global timing calibration, logical track descriptors and extensible, migratable metadata.
 - Exact flash allocation/ABI, write persistence, power integrity, contacts and safe removal behaviour remain to be designed; see [06 — Part 3 / Section 11](06-part-3-media-architecture.md).
 
 The desired physical presentation is that of an original Macintosh 3.5-inch floppy drive, with a cartridge inserted through the normal opening.
@@ -124,9 +124,10 @@ Documentation should distinguish **verified source facts**, **observations or me
 - [05 — Cartridge contact concepts](05-cartridge-contact-concepts.md): removable-media contact options.
 - [06 — Part 1 / Sections 1–9: Host interface and drive operations](06-part-1-drive-interface.md): selector, control/status, seek, TACH, readiness and eject.
 - [06 — Part 2 / Section 10: Serial GCR reading](06-part-2-serial-gcr-read.md): waveform, 6-and-2 track structure and freshly formatted track reference.
-- **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** agreed structured encoded-GCR sector records plus raw-track compatibility, three-buffer cache, one SYNC6 calibration, track descriptors/TACH, 2-MiB allocation budgets, extensible directory and external programming workflow.
+- **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** agreed structured encoded-GCR sector records plus reserved RAW_TRACK extension, three-buffer cache, one SYNC6 calibration, track descriptors/TACH, 2-MiB allocation budgets, extensible directory and external programming workflow.
 - **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate and both-edge WR capture, 50-SYNC6 candidate format detection, structured sector replacement, asynchronous flash persistence and open power-cut/raw-track write gates.
-- **[06 — Part 5 / Section 13: Formatting, geometry and 400K compatibility](06-part-5-format-geometry-400k.md):** 400K/800K sector classes, side/format bytes, preserved interleave/sector identities, complete standard track reconstruction, seam and ROM format/Verify checks. Sections 14–18 remain on Part 1's roadmap.
+- **[06 — Part 5 / Section 13: Formatting, geometry and 400K compatibility](06-part-5-format-geometry-400k.md):** 400K/800K sector classes, side/format bytes, preserved interleave/sector identities, complete standard track reconstruction, seam and ROM format/Verify checks.
+- **[06 — Part 6 / Section 14: Standard-media error handling](06-part-6-error-handling-standard-media.md):** first-release standard-image-only scope, absent/blank/protected media, interrupted writes/formatting, retries, flash/cache faults and safe removal. Sections 15–18 remain planned.
 - `source/`: firmware and/or digital-logic implementation, pending architecture selection.
 - `kicad/`: schematics and PCB design.
 - `3d-drawing/`: mechanical CAD and cartridge/chassis models.
