@@ -25,7 +25,7 @@
 - [12.11 SYNC6 automatic calibration during formatting](#1211-sync6-automatic-calibration-during-formatting)
 - [12.12 RAM buffers, write acceptance and flash persistence](#1212-ram-buffers-write-acceptance-and-flash-persistence)
 - [12.13 A proposed STM32 write state machine](#1213-a-proposed-stm32-write-state-machine)
-- [12.14 Timing and buffer budget](#1214-timing-and-buffer-budget)
+- [12.14 Timing, SRAM and flash throughput budget](#1214-timing-sram-and-flash-throughput-budget)
 - [12.15 Verification/acceptance matrix](#1215-verificationacceptance-matrix)
 - [12.16 Decisions and remaining engineering gates](#1216-decisions-and-remaining-engineering-gates)
 
@@ -200,7 +200,6 @@ The **first edge's phase relative to write-gate assertion is not guaranteed to b
 
 **[OPEN]** Quantify input jitter, timer resolution, clock crossing, allowable interval error and comparator/level-shifter delay. The 489,600 bit/s nominal rate is settled as project timing baseline, while **physical measurement remains pending**.
 
-
 ### 12.8 Identifying the target sector from virtual read position
 
 **[DECISION]** STM32 tracks the selected radial track/side, virtual RD bit phase and the sector-position map of its **fully reconstructed cyclic RAM track**. The ROM reads the target **address field** before issuing an ordinary gated **data-field-only** write. The STM32 may associate the incoming write with the most recent *complete* valid address field, then check the separately encoded sector ID in the incoming data header. This must be a **validated association**, not a guess based only on gate assertion.
@@ -208,7 +207,6 @@ The **first edge's phase relative to write-gate assertion is not guaranteed to b
 **[DECISION]** A standard flash record preserves the **10-byte encoded address field**, **4-byte data header**, and **703 encoded payload/checksum codewords**. An ordinary write replaces only the latter two components (after validation); **the existing address field remains unchanged**, and other sectors remain untouched. The full 735-byte in-RAM record and generated sync/gap region determine the rebuilt playback track.
 
 **[OPEN]** The ROM/IWM's delay between address recognition and gate assertion, WR start/end pipeline and sector ID decoding must be bench-verified. Do not silently change the wrong record on a missing/ambiguous address, bad identifier or invalid nonstandard sector map.
-
 
 ### 12.9 Read-to-write handoff and write splice
 
@@ -226,7 +224,6 @@ tE: /WRREQ rising edge
 **[DECISION — structured standard tracks]** After reconstructing the incoming serial GCR codewords, identify `SYNC6`, `D5 AA AD`, the encoded sector ID, **703 GCR data/checksum bytes** and `DE AA FF FF`. Validate the header/target against the previously presented stored address. Copy the **data header + 703 codewords** into the selected in-RAM record, rebuild/correct only the standard field's known generated sync/padding/gap, then atomically publish the updated RAM track. **No exact physical flux-splice recording is required** for standard tracks; preserve every other sector record and the complete existing 10-byte address header.
 
 **[OPEN — RAW_TRACK]** For untouched packed-bit nonstandard tracks, a literal bit-cell splice or explicitly unsupported-write policy must be designed separately. Do not rewrite copy-protected or unusual tracks into standard layout merely because they contain familiar markers. Hardware proof is needed for first/last WR cells, timing tolerance, truncation and race-free stream publication.
-
 
 ### 12.10 Whole-track formatting and first-use blank media
 
@@ -260,7 +257,6 @@ Valid intervals in repeated SYNC6:
 
 **[OPEN]** Select permitted ppm/jitter bounds and success/fallback rules, and determine how to handle calibration recorded by a different Macintosh or a different STM32 oscillator. SYNC6 does **not** calibrate RD output pulse width, pin voltage, flash write completion or TACH—these are independent host-visible characteristics. Initial nominal timing must work well enough to allow the first format.
 
-
 ### 12.12 RAM buffers, write acceptance and flash persistence
 
 **[DECISION]** **At least three independently managed complete-track RAM buffers of at least 12 KiB each (>=36 KiB)**, plus separate DMA/ring write-edge capture buffers, page staging and cache descriptors. A buffer may be ACTIVE/READABLE, INCOMING/RECONSTRUCTING or DIRTY/FLUSHING, with roles reassigned dynamically; pin a buffer/generation when in active RD use or until its sole dirty copy is safely committed. No incoming WR edge or active RD pulse may block on SPI NOR erase/page-program.
@@ -274,7 +270,6 @@ Valid intervals in repeated SYNC6:
 **[DECISION]** The SPI worker may begin erasing safe target units when a format is recognized and may program/verify a completed buffered track while the ROM is formatting a subsequent track. Immediate readback **must not wait for SPI completion**. Streaming stable pages during reception is a future optional optimization, **not required** by the first implementation. Avoid committing unvalidated partial sector/track data.
 
 **[OPEN]** Specific chip/SPI transfer and polling overhead, transaction atomicity, wear, dirty-generation eviction, power-loss recovery and safe physical cartridge release. A three-buffer minimum does not prove arbitrary write bursts can be absorbed indefinitely; implement deterministic overflow/backlog handling without pretending the interface has a host pause/acknowledgment mechanism.
-
 
 ### 12.13 A proposed STM32 write state machine
 
@@ -318,7 +313,6 @@ FAULT / BACKLOG
 ~~~
 
 **[OPEN]** Hardware timing, cache pressure, metadata atomicity, flash durability and ROM-compatible circular format check require bench fixtures.
-
 
 ### 12.14 Timing, SRAM and flash throughput budget
 
@@ -377,7 +371,6 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 
 **Recommended test progression:** (1) electrical both-edge/gate fixture; (2) known SYNC6 and arbitrary bit-pattern capture; (3) ordinary `Sony_WrData` simulation at variable gate phase; (4) real Plus one-sector write/readback; (5) whole-track format and immediate ROM sector-0 read; (6) four zone-boundary/side changes with a *single* GCR clock; (7) flash power-cut/eject; (8) external image conversion and boot.
 
-
 ### 12.16 Decisions and remaining engineering gates
 
 **Established:**
@@ -386,7 +379,7 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 - **[ROM]** Ordinary `Sony_WrData` starts with one SYNC6 and writes a data field only; format `SONY_DOFORMAT` starts with 200 consecutive SYNC6 then all sectors. The STM32 uses **>=50 consecutive groups** as an *early candidate format* trigger, not final acceptance.
 - **[DECISION]** Standard cartridge representation: **32-byte sector metadata retaining complete address/data headers + 703 unchanged encoded data/checksum codewords**; full cyclic standard sync/gaps/fixed pads are regenerated in RAM. Nonstandard RAW_TRACK remains an alternative bit-packed representation.
 - **[DECISION]** At least **three independent >=12-KiB complete-track buffers** plus separate capture rings; structured replacement for normal sector writes; async flash worker, cache generation pinning and immediate RAM readback.
-- **[DECISION]** Erase-aligned standard extents (three 4-KiB erase units for 12-sector tracks, two for 8–11), versioned/extendible per-track directory and **one global** calibration. 2-MiB is the target flash size; reference worst-case internal flash operation budgets in `12.14.
+- **[DECISION]** Erase-aligned standard extents (three 4-KiB erase units for 12-sector tracks, two for 8–11), versioned/extendible per-track directory and **one global** calibration. 2-MiB is the target flash size; reference worst-case internal flash operation budgets in §12.14.
 - **[DECISION]** No artificial mechanical delays; continuous cyclic RD, ROM-compatible electrical timing/TACH, safe eject and durable accepted writes remain required.
 
 **Proposed exact implementation / still to verify:**
@@ -398,7 +391,7 @@ Standard sector records: **32 metadata bytes + 699 data GCR codewords + 4 data-c
 - RAW_TRACK nonstandard write-splice support (no silent normalization), external importer fidelity and host-to-host calibration transfer.
 - STM32 peripheral/SRAM scheduling, 2-MiB allocation including directory generations, spare blocks and wear.
 
-**Validation gates:** original Plus 20-pin hardware and [Apple 699-0452-A](https://mirrors.apple2.org.za/www.bitsavers.org/pdf/apple/disk/sony/MP-F51_spec.pdf) for gate/WR/RD timing; ROM full-format + immediate sector-0 readback, 400K/800K side/zone changes, multiple sector overwrites, sustained formatting with three buffers, interrupted/power-cut operations and external-programmer boot.
+**Validation gates:** original Plus 20-pin hardware and [Apple 699-0452-A](https://mirrors.apple2.org.za/www.bitsavers.org/pdf/apple/disk/sony/MP-F51_specs/669-0452-A_800K_Double-Sided_ERS_Sep86.pdf) for gate/WR/RD timing; ROM full-format + immediate sector-0 readback, 400K/800K side/zone changes, multiple sector overwrites, sustained formatting with three buffers, interrupted/power-cut operations and external-programmer boot.
 
 **Document history**
 
