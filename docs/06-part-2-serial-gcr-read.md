@@ -8,7 +8,7 @@
 **Preferred implementation:** STM32 (specific part/peripherals not yet selected)  
 **Date:** 9 November 2026
 
-> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. Structured-GCR sector records plus raw-track compatibility, SYNC6 calibration, logical track metadata and TACH are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is in **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; format geometry, standard reconstruction and 400K compatibility are in **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)**. [Part 6 / Section 14](06-part-6-error-handling-standard-media.md) limits initial supported media and defines fault handling; later sections are **15–18**.
+> **Document split:** This continues [06 — Part 1: Host interface and drive operations, Sections 1–9](06-part-1-drive-interface.md). **This Part 2 contains Section 10 only**. Structured-GCR sector records plus reserved future raw-track ID, SYNC6 calibration, logical track metadata and TACH are consolidated in **[06 — Part 3 / Section 11](06-part-3-media-architecture.md)**. Detailed serial writing is in **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)**; format geometry, standard reconstruction and 400K compatibility are in **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)**. [Part 6 / Section 14](06-part-6-error-handling-standard-media.md) limits initial supported media and defines fault handling; later sections are **15–18**.
 >
 > **Design rule:** Emulate the *electrical and logical* read interface, **not** spinning hardware, sounds, seek time or motor inertia. Yet the IWM still expects correctly timed **serial pulse patterns** and recognizes recorded fields as they arrive. Do not mistake “no mechanical rotational latency” for permission to output whole bytes instantly or substitute a static status value for disk data.
 
@@ -236,7 +236,7 @@ This is **physical stream order**, not the numeric order of logical 512-byte blo
 - Complete RAM reconstruction before RD becomes ready. Never change bit lengths mid-playback.
 - **First release:** the read engine accepts STRUCTURED_GCR only; RAW_TRACK is a reserved future extension and must be rejected safely, never auto-normalized into standard records (Part 6 §14).
 
-**[DECISION]** Use the standard ROM-compatible gap, seam and cyclic-duration profile described in [Part 5 §13](06-part-5-format-geometry-400k.md). **[OPEN — verification]** Bench-check accepted gap/phase and the ROM's sector-0 readback on real hardware; no first-release RAW_TRACK playback test is required. Part 3 §11 defines structured and raw persistence.
+**[DECISION]** Use the standard ROM-compatible gap, seam and cyclic-duration profile described in [Part 5 §13](06-part-5-format-geometry-400k.md). **[OPEN — verification]** Bench-check accepted gap/phase and the ROM's sector-0 readback on real hardware; no first-release RAW_TRACK playback test is required. Part 3 §11 defines structured standard persistence and reserved RAW_TRACK schema extension.
 
 ### 10.7 The five zones and track wrapping
 
