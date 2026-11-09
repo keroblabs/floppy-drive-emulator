@@ -99,7 +99,7 @@ This **bit 7** is a property of the IWM's read-data register, **not an extra RD 
 
 **[IWM]** Apple's *SWIM Chip User's Reference* uses **2 µs per IWM GCR bit cell** in its fast-mode explanation. Thus `1` bits generate pulses and `0` bits do not, producing **2, 4 or 6 µs nominal** intervals for valid GCR patterns. A continuously repeating *electrical level* is not the code stream; discrete pulses represent flux transitions.
 
-**[OPEN — do not silently conflate]:** **489.6 kbit/s** corresponds to approximately **2.0425 µs per bit**, whereas the IWM/SWIM explanation calls a bit cell **2 µs** (500 kbit/s). These are different numerical values in the cited sources. The original specification's detected-transition tolerance and actual IWM clock/recovery margins may accommodate that difference, but **the exact STM32 pulse clock should not be locked to either figure without reconciling the host/drive timing evidence and acceptance tests**.
+**[DECISION — project timing baseline]:** Use **489,600 bit/s = 2.042484 µs per bit cell** as the nominal STM32 raw-GCR stream timing, pending a planned logic-analyser check on real hardware. The IWM/SWIM reference's rounded **2 µs** explanatory cell is not the selected implementation value. For example, nominal 1/2/3-cell transition intervals at our selected rate are approximately **2.042/4.085/6.127 µs**; keep the original Apple waveform/tolerance requirements for electrical acceptance.
 
 **[SONY]** Apple `3.4.1.1 (printed sheet **23**, PDF index 22) also gives **≤0.5 µs** for an enabled RD output to reflect an addressed signal change and **≤0.5 µs** to reach high impedance after disable. These are **electrical response requirements**, not permissions for arbitrarily high interrupt latency.
 
@@ -121,51 +121,122 @@ FF 3F CF F3 FC FF      (special overlapping self-sync pattern)
 
 The bytes are **not six ordinary independently aligned `$FF` nibbles**: the concatenated bitstream includes the bit-slip/synchronization structure. The IWM must see the correct *serial pattern*; simply concatenating sector records without sync/gap structure is insufficient.
 
-**[DECISION]** Treat the encoded track as a stream of **bit cells** (or an equivalent timestamped pulse sequence). The encoder can be implemented offline or during a buffer fill; time-critical pulse output must be independent from expensive GCR arithmetic.
+**[DECISION]** Treat the encoded track as a stream of **bit cells** (or an equivalent timestamped pulse sequence). **SPI flash holds packed raw-GCR bits**, and the Macintosh ROM performs 6-and-2 encoding/decoding. The STM32's internal **sync generator** is a distinct, standard-track preparation function: it can provide canonical sync bits without re-encoding user data. Real-time RD pulse output must be independent of any format inspection or flash access.
 
-### 10.6 Full sector structure
+### 10.6 Full sector structure — exact Macintosh Plus freshly formatted reference
 
-**[SONY]** Apple's 699-0452-A **Appendix B (printed sheets 39–42)** and Apple's SWIM reference `GCR Track Format describe **two fields per sector**, each with preceding synchronization.
+**Purpose and evidence boundary.** This subsection is a **read-side reference fixture** for what the Macintosh Plus ROM's `Sony_CtlFormat` / `SONY_FORMATTRACK` / `SONY_DOFORMAT` sends through the IWM. It is useful for preparing, validating and replaying an initially formatted raw-GCR track. The **byte sequence transmitted during formatting** and the **final circular bitstream on a physical disk** are not identical concepts: the formatter deliberately transmits beyond one revolution and may adjust its gap length. Nor does an ordinary sector rewrite necessarily leave every pad/splice bit unchanged. Do not model the format operation as a request to the drive to write a sector record; these are consecutive GCR bytes that the IWM serializes onto WR.
 
-**Address field:**
+**ROM evidence (inspect these routines, not merely a generic 800K diagram):**
+
+- [`SONY_ADRMKTBL`, lines 2742–2752](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2742-L2752) — exact **27 transmitted bytes per sector's address/data prologue**; a following `$00` at template offset 27 is an **unused array pad**, *not* transmitted.
+- [`Sony_CtlFormat`, lines 2755–2804](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2755-L2804) — formats 80 tracks, initially `GapSync = 7`, formats both sides unless one side is requested.
+- [`SONY_FORMATTRACK`, lines 2883–2955](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2883-L2955) — checks the returned sector-0 address and adjusts `GapSync`, potentially rewriting the track.
+- [`SONY_DOFORMAT`, lines 2958–3078](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2958-L3078) — **200 starting sync groups**, then gap, address/data template, **703 `$96` codewords** and **`DE AA FF FF`** for each sector.
+- [`SONY_FILLINMARKS`, lines 3080–3131](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L3080-L3131) — header values, XOR checksum and sector ordering.
+- [`SONY_WRDATAMKS` / `Sony_WrData`, lines 2531–2719](https://github.com/jonathanschilling/mac_rom/blob/main/plus/resources/res_drvr_sony.s#L2531-L2719) — ordinary **data-field-only** rewrite pattern; distinct from a format.
+
+#### 10.6.1 Exact six-byte self-synchronization group
+
+The ROM emits the following **48 serialized bits**, MSB first:
 
 ~~~text
-[header sync]
-D5 AA 96
-[Track] [Sector] [Side] [Format] [Checksum]
-DE AA
-[pad/gap as required]
+SYNC6 (six ROM bytes) : FF 3F CF F3 FC FF
+Serial bits           : 11111111 00111111 11001111 11110011 11111100 11111111
+Equivalent bit pattern: (1111111100) × 4, then 11111111
 ~~~
 
-The five bracketed values are **six-bit quantities encoded through the GCR lookup**. Their meaning:
+Those **ten-bit** groups are deliberately misaligned relative to normal eight-bit GCR codewords; they let the IWM recover byte synchronization. `SYNC6` is a **bit pattern**, not six independently decoded `$FF` GCR bytes. It is constructed by the **Macintosh ROM**, clocked out by the **IWM**, and must be represented faithfully at bit level by the STM32. Address and data fields each have their own sync.
 
-| Byte/field | Meaning |
+#### 10.6.2 Transmitted sequence when the Plus formats a track/side
+
+Define `G = GapSync` (initially **7**; may change after the ROM checks the gap). The ROM enters the IWM write state using an initial loading byte, then runs this loop:
+
+~~~text
+ONCE AT THE BEGINNING OF THE FORMAT WRITE:
+    200 × SYNC6                      ; startup/overrun sync; NOT a guaranteed
+                                     ; permanent 200-group gap on the disk
+
+FOR EVERY SECTOR IN THE ROM'S PHYSICAL INTERLEAVE ORDER:
+    (G - 1) × SYNC6                  ; repeated inter-sector sync groups
+
+    SYNC6                            ; final address sync group (template bytes 0–5)
+    D5 AA 96                         ; address-field prologue (template 6–8)
+    [T] [S] [H] [F] [X]              ; FIVE 6-bit values encoded as legal GCR bytes
+    DE AA                            ; address end/slip marks (template 14–15)
+    FF                               ; address OFF-PAD (template 16)
+
+    SYNC6                            ; data-field sync (template 17–22)
+    D5 AA AD                         ; data-field prologue (template 23–25)
+    [S]                              ; sector ID, GCR-encoded (template 26)
+    703 × 96                         ; freshly formatted zero tags/data/checksums
+    DE AA                            ; data end/slip marks
+    FF FF                            ; trailing WRITE-OFF padding
+
+ONCE AFTER THE LAST SECTOR:
+    Leave IWM write state; ROM reads the next address field to test fit.
+~~~
+
+**`[T] [S] [H] [F] [X]` are single eight-bit GCR codewords, not plain binary values:**
+
+| Value | Meaning in the ROM format |
 |---|---|
-| `D5 AA 96` | Address-field mark |
-| Track | Lower six bits of radial track |
-| Sector | Sector ID on the current track |
-| Side | Head/side flag and higher track bits (as defined by source encoding) |
-| Format | Format identifier: conventional **`$02` 400K** / **`$22` 800K** 2:1 interleave |
-| Checksum | XOR of track, sector, side and format 6-bit values, GCR encoded |
-| `DE AA` | Bit-slip/end marks, followed by padding |
+| `[T]` | Radial track, low six bits |
+| `[S]` | Sector ID in the current interleave order |
+| `[H]` | Side flag plus upper track bits |
+| `[F]` | Format value (`$02` one-sided, `$22` two-sided), then encoded through `NiblTbl` |
+| `[X]` | XOR of the four preceding *six-bit* values, then GCR-encoded |
 
-**Data field:**
+The `703 × $96` means **699 GCR codewords for 12 zero tag bytes + 512 zero user bytes**, followed by **four GCR codewords for zeroed data checksums**. `$96` is the lookup-table encoding of six-bit zero. The separate, GCR-encoded **sector ID preceding those 703 codewords** is not generally `$96`. A subsequent ordinary write produces different 703 encoded bytes/checksums. The ROM transmits **27 template bytes** (offsets 0–26); the template's byte at offset 27 is **not output**.
+
+#### 10.6.3 Exact gaps and their boundaries
+
+| Location | Fresh format transmitted bits/bytes | Purpose |
+|---|---|---|
+| **Before an address mark** | `G × SYNC6` in total: `G-1` loop groups plus one from the template | Inter-sector gap plus address byte synchronization |
+| **Address mark** | `D5 AA 96` | Next sector's address field |
+| **Immediately after address `DE AA`** | Exactly **one `FF` pad byte**, followed by `SYNC6` | Address write-off pad and **independent** data synchronization |
+| **Immediately before data `D5 AA AD`** | One `SYNC6` | Data-field byte synchronization |
+| **Immediately after data `DE AA`** | Exactly **two `FF` pad bytes** | Allows final useful bytes to leave IWM before the write ends in ordinary writes |
+| **Between data end and next address** | `FF FF`, then `G × SYNC6`, then next `D5 AA 96` | Normal formatted inter-sector boundary |
+
+With the initial **`G = 7`**, there are **seven complete 48-bit sync groups** leading into each address mark (six emitted by the gap loop, one by the template). This is not seven `FF` bytes and it does not mean an unrecorded, pulse-free interval.
+
+**One sector's transmitted format-loop length**, excluding the 200 initial groups and initial IWM setup byte, is:
 
 ~~~text
-[data sync]
-D5 AA AD
-[Sector ID]
-[699 encoded GCR bytes representing 12 tag + 512 user bytes]
-[4 GCR checksum code bytes representing 24 checksum bits]
-DE AA
-[pad/gap as required]
+(G - 1) × 6  +  27  +  703  +  4  =  6G + 728 bytes
+At G=7: 770 serialized bytes = 6,160 bit cells per sector entry
+At 489,600 bit/s: approximately 12.582 ms per entry (before any physical wrap)
 ~~~
 
-**[SONY]/[ROM]** Twelve tag bytes plus 512 data bytes make **524 decoded bytes**. The 6-and-2 process turns them into **699 encoded GCR code bytes** (four six-bit code values for every three original bytes, with grouping/packing conventions as specified) and maintains **three running 8-bit checksums**. Those 24 checksum bits are encoded as four GCR code bytes. The address checksum is a separate XOR checksum.
+**Important circular-track distinction:** `200 × SYNC6` is a lead-in emitted at format time **before** the complete track's sectors. Because the medium rotates while the ROM keeps writing, later output can **overwrite part of this lead-in**. The ROM then searches for sector 0 and adjusts `GapSync` or rewrites to fit. It is therefore **incorrect to prepend 200 groups to a permanent cyclic track buffer** or to declare that the final gap from last sector to sector 0 must be exactly the original transmitted lead-in. The final seam/remaining gap must be determined from the chosen virtual revolution length and validated; a physical format's exact write-splice residue is not fully specified by the ROM byte tables.
 
-The Plus ROM reads the field mark and its sector identifier, reconstructs the 12 tags plus 512 data bytes, verifies the running checksums, and checks the trailing slip marks. **A stream containing only sector user data and marks without valid tag/GCR/checksum structure cannot satisfy the normal ROM driver**.
+#### 10.6.4 Physical sector order during formatting
 
-**[OPEN]** Exact gap lengths, sync-field growth/shrinkage, write splice and formatting interleave must be specified using the complete Appendix B and ROM format paths (future Section 12), and should be tested with real formatted image fixtures. Do not choose arbitrary constant gap bytes and claim full disk compatibility.
+`SONY_FILLINMARKS` constructs **2:1 interleave**: alternate entries in the first half of the IDs with entries in the second half. For `n` sectors, `k = ceil(n/2)`; the order is `0, k, 1, k+1, …`, stopping when all IDs have appeared.
+
+| Zone (tracks) | Sectors per side | ROM format order |
+|---|---:|---|
+| 0–15 | 12 | `0 6 1 7 2 8 3 9 4 10 5 11` |
+| 16–31 | 11 | `0 6 1 7 2 8 3 9 4 10 5` |
+| 32–47 | 10 | `0 5 1 6 2 7 3 8 4 9` |
+| 48–63 | 9 | `0 5 1 6 2 7 3 8 4` |
+| 64–79 | 8 | `0 4 1 5 2 6 3 7` |
+
+This is **physical stream order**, not the numeric order of logical 512-byte blocks presented to the operating system.
+
+#### 10.6.5 STM32 internal sync generation — agreed standard-track policy
+
+**[DECISION]** The SPI-flash cartridge stores **bit-packed raw 6-and-2 GCR track data**, not just decoded 512-byte sectors. The STM32 will have an **internal canonical `SYNC6` generator** for preparing and validating **standard, freshly formatted** track streams and for restoring known synchronization regions when operating in an explicitly standard/normalized track mode.
+
+- Produce the **exact 48-bit `SYNC6` pattern**, with the appropriate group count and **without inserting/deleting bit cells during active RD playback**. This can be precomposed into a RAM track buffer or selected from a synchronized generator by track-region metadata; the implementation choice remains open.
+- Keep the **five encoded header values, sector-ID byte, data payload and checksums** in their existing raw-GCR representation. Generating `SYNC6` must **not** require re-encoding the 6-and-2 data in the time-critical read path.
+- Use a **validated track map** (track/side, bit positions, address/data sync regions, and stream length) when generating/replacing sync. Do **not** find and overwrite arbitrary `FF` runs: `FF` may be legitimate GCR data.
+- Preserve the chosen **cyclic track duration**, all field prologues, and correct interleave. Do **not** append the 200 format-time lead-in groups to a finished track.
+- **Never silently normalize unknown/nonstandard raw tracks.** Copy-protected layouts, deliberately unusual gaps, write splices and partially formatted media may depend on noncanonical content; replay raw bits unless a normalizing policy is explicitly selected. The exact rules for accepting a track after format and merging later sector writes belong to **Part 3 / Section 11**.
+
+**[OPEN]** Define the final physical-to-virtual track seam, the representable gap-length ranges, whether to retain captured post-format write-splice bits, and how/when a standard-track map is marked valid. Verify the byte stream against Macintosh Plus formatting and subsequent readback with a logic analyser. **Readback acceptance** requires the IWM/ROM to recover `D5 AA 96`, all five valid header values, `DE AA`, then `D5 AA AD`, the sector ID, decoded zero tags/data and correct checksums at every zone.
 
 ### 10.7 The five zones and track wrapping
 
@@ -181,7 +252,7 @@ Apple 800K disks retain an approximately fixed bit rate by varying the **physica
 
 There are **80 tracks per side** and **800 sectors per side**, therefore **1600 × 512-byte user sectors = 819,200 bytes (800 KiB)** across two sides. **400K media** uses one side of the same zone/track geometry (800 sectors); presenting a 400K formatted disk is distinct from emulating a 400K-only mechanism.
 
-**[ROM]** Appendix B describes **approximately 2:1 sector interleave** and varying physical sector order per zone. Its interleave/gap layout is relevant because the ROM **scans a continuous track stream**, not randomly addressed sector records.
+**[ROM]** The exact **2:1 sector interleave** for freshly formatted tracks is listed in `10.6.4; its sequence varies by sector count/zone. The ROM **scans a continuous track stream**, not randomly addressed sector records. The format-time 200-group lead-in is **not** a permanent virtual track prefix (`10.6.3).
 
 **[DECISION]** Use a logically **cyclic, continuous track stream** for each selected radial track and side. After the final encoded bit cell, wrap to the first bit cell without producing a false sync/mark or illegal long zero gap. When the selected track or side changes, switch the backing stream coherently and satisfy /READY before advertising a new valid stream. One can choose an arbitrary *initial virtual phase* (no physical rotational-latency simulation required), but once running the stream must behave like a valid ongoing sequence, including gaps and wraparound.
 
@@ -220,23 +291,30 @@ Relevant ROM-side errors include:
 
 ### 10.9 Streaming model, transitions and storage interaction
 
-The **read-data engine** should be conceptually separated into a *format construction layer*, a *bitstream scheduler* and the *physical RD output path*:
+The **read-data engine** should be conceptually separated into *raw-track retrieval*, *optional standard-track sync construction/validation*, *bitstream scheduling* and the *physical RD output path*:
 
 ~~~text
-SPI-flash cartridge  →  logical disk image / tags / metadata
-                               │
-                  GCR track/sector formatter
-             sync + marks + codewords + checksums
-                               │
-                prepared cyclic track bitstream
-              side + track + zone + read-only phase
-                               │
-              deterministic pulse-event scheduler
-                  (1 bits = pulses; 0 = no pulse)
-                               │
-          multiplexed, tri-state-capable RD output
-                  Macintosh Plus IWM input
+Removable SPI-flash cartridge (packed raw-GCR bits + track metadata)
+                              │
+                 Load selected track/side into RAM
+                              │
+          Inspect/validate address and data boundaries
+            [standard-track mode, when applicable]
+                              │
+        Internal canonical SYNC6 generator/normalizer
+       (only known sync regions; never re-encode payload)
+                              │
+              Prepared cyclic bit-packed track
+               (known bit length and virtual phase)
+                              │
+              Deterministic pulse-event scheduler
+                 (1 bits = pulses; 0 = no pulse)
+                              │
+           Multiplexed, tri-state-capable RD output
+                       Macintosh IWM
 ~~~
+
+Unknown/nonstandard raw tracks bypass canonical sync replacement. An ordinary read is **not** a request to generate a new sector from decoded data; it replays the prepared raw stream.
 
 **State and event expectations:**
 
@@ -259,7 +337,7 @@ SPI-flash cartridge  →  logical disk image / tags / metadata
 | Component | Time critical? | Possible implementation |
 |---|---|---|
 | Media/image retrieval and track cache | No, if done before ready | SPI peripheral + DMA/foreground |
-| 6-and-2 GCR encoding, marks and checksums | No, if precomputed | MCU software / lookup tables |
+| Standard-track sync-generation, region-map inspection and validation | No, if prepared before ready | Canonical 48-bit sync template + raw-GCR metadata; no routine 6-and-2 payload re-encoding |
 | Prepared cyclic stream phase and zone timing | Yes, for smooth output | Hardware timer plus coherent buffer state |
 | **Pulse rise and fall (0.3–0.8 µs wide)** | **Yes** | Timer output compare / DMA event stream / external gating |
 | Data-source and status multiplexer | **Yes (≤0.5 µs source timing)** | Verified fast hardware mux / GPIO+buffer, subject to bench measurement |
@@ -273,9 +351,13 @@ A CPU-driven interrupt for *every GCR transition* may approach hundreds of thous
 
 ~~~text
 prepare_track(track, side, media):
-    encoded = build_complete_GCR_track_with_sync_marks_and_gaps(media)
-    validate_encoder_round_trip(encoded)
-    atomically_publish_stream_if_selection_still_matches()
+    raw_bits, metadata = read_packed_GCR_track_from_flash(track, side)
+    if metadata.track_mode == STANDARD and validate_region_map(raw_bits, metadata):
+        raw_bits = normalize_only_mapped_sync_regions(raw_bits, SYNC6)
+        assert bit_length_is_unchanged(raw_bits)
+    else:
+        preserve_raw_bits_exactly()
+    atomically_publish_stream_and_phase_if_selection_still_matches()
 
 hardware_timed_output:
     for each bit cell in repeating encoded_track_bitstream:
@@ -307,12 +389,12 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 | RD source/selector change | Correct new source promptly; validate **0.5 µs** bound | [SONY] |
 | Individual data pulses | **0.3–0.8 µs width** at connector | [SONY] |
 | Legal GCR pulse spacing | Nominal **2, 4, 6 µs** pattern and transition tolerance | [SONY]/[IWM] |
-| Nominal bit rate | Resolve **489.6 kbit/s vs 2 µs IWM cell** before selecting clock | [OPEN] |
+| Nominal bit rate | **489,600 bit/s / 2.042484 µs** project baseline; verify with logic analyser | [DECISION; bench pending] |
 | 800K track zones | 12/11/10/9/8 sectors, 80 tracks/side, correct mark/checksum layout | [SONY] |
 | IWM reads `q6L` | Byte-complete high bit and expected GCR code bytes produced | [IWM]/[ROM] |
-| Self-sync and cyclic wrap | ROM locks to `D5 AA 96` when it starts scanning at arbitrary phase | [ROM]/[DECISION] |
+| Self-sync and cyclic wrap | ROM locks to `D5 AA 96` at arbitrary phase; validate **no permanent 200-sync lead-in** and no invalid wrap seam | [ROM]/[DECISION] |
 | Address data correctness | Correct track/side/sector/format and XOR checksum | [ROM] |
-| Data field correctness | 12 tags + 512 bytes decoded with valid three checksums | [ROM] |
+| Data field correctness | Fresh format reads zero tags + 512 zero bytes from 703 × `$96` after encoded sector ID; normal writes read valid 6-and-2 data/checksums | [ROM] |
 | Both heads | Change side without incrementing radial track; correct data selection | [ROM] |
 | Status-to-data switch | No malformed leading pulses or unwanted command execution | [DECISION] |
 | Slow/busy flash operation | RD timing stays within bounds while ready | [DECISION] |
@@ -329,22 +411,25 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 - **[DECISION]** Section 10 is the only numbered protocol operation in **06 — Part 2**.
 - **[DECISION]** The STM32 generates genuine GCR-like **RD electrical pulses** through the unchanged Macintosh IWM.
 - **[DECISION]** One shared virtual track/zone model must agree with Part 1's TACH and /READY.
+- **[DECISION]** Cartridge storage is **bit-packed raw GCR**; the STM32 may generate **canonical 48-bit SYNC6** internally in mapped standard-track sync regions, without re-encoding sector payloads or silently modifying nonstandard tracks.
+- **[ROM]** Fresh format detail is specified in `10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
 - **[DECISION]** Leave write capture/erase/write-gate timing for **06 — Part 3, Section 11**.
 
 **Research/implementation gates before hardware selection:**
 
-1. Reconcile the **489.6 kbit/s** Apple drive transfer-rate figure with the IWM's nominal **2 µs fast-mode bit cell**, using primary source timing and ideally a real host measurement.
+1. **Bench-validate the chosen 489,600 bit/s / 2.042484 µs nominal cell** on a real Macintosh/IWM with a logic analyser (and verify read and write pulse tolerances); the choice is settled, measurement is pending.
 2. Confirm exact **RDDATA idle polarity, pulse shape and line loading**, and prove ≤0.5-µs mux/output-disable behaviour with the selected STM32/buffer architecture.
 3. Cross-check **`3.4.1.2 T1/T2/T3/T6`** edge relationships on original hardware, particularly head switching and write-gate recovery.
 4. Define how to implement **continuous cyclic streams** while not imposing unnecessary initial rotational latency, and determine head-to-head phase relationship if relevant.
-5. Decide which disk-image representation is supported first: **standard sector images plus tags**, richer disk images, or raw track pulses; do not silently discard non-standard information.
-6. Validate GCR encoding/decoding against **known ROM fixtures**, including full three-checksum data-field generation, sync slips and byte-boundary recovery.
+5. Define packed **raw-GCR flash layout**, bit-length metadata, sync-region map and the explicit boundary between **canonical standard tracks** and **untouched nonstandard raw tracks**; avoid silent changes to copy-protected data.
+6. Validate **fresh-format stream and raw playback** against known ROM fixtures (including 200 transient lead-in groups, `GapSync` adjustment, both prologues, pads, checksums, slip marks and byte-boundary recovery); no routine payload re-encoding in STM32 is assumed.
 7. Measure **worst-case timer/DMA jitter, CPU loading, memory footprint and SPI flash stalls** for candidate STM32 devices.
 8. Determine exact behaviours for **unformatted media, write splice, speed-zone transition during active output and drive re-enable**.
 9. Define the final boundary between **Part 2 read engine** and **Part 3 write capture**, including ownership of the RD output, track buffers, and persistent data.
 
 **Document history**
 
+- **2026-11-09:** Expanded `10.6` with the exact **freshly formatted GCR write stream** as a read-side reference; fixed address/data pad/gap details, `GapSync`, transient 200-group lead-in and 2:1 interleave. Settled STM32 **canonical sync generation for mapped standard tracks**, preserving raw-GCR flash storage and nonstandard-track replay. Updated chosen **489,600 bit/s** timing baseline; bench measurement remains pending.
 - **2026-11-09:** Created **06 — Part 2**, giving Section 10 its own research and implementation specification. Original **06** split into **06 — Part 1** (Sections 1–9); future Section 11 assigned to **06 — Part 3**. Timing and storage design deliberately remain under verification.
