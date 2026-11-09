@@ -125,7 +125,8 @@ Documentation should distinguish **verified source facts**, **observations or me
 - [06 — Part 1 / Sections 1–9: Host interface and drive operations](06-part-1-drive-interface.md): selector, control/status, seek, TACH, readiness and eject.
 - [06 — Part 2 / Section 10: Serial GCR reading](06-part-2-serial-gcr-read.md): waveform, 6-and-2 track structure and freshly formatted track reference.
 - **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** agreed structured encoded-GCR sector records plus raw-track compatibility, three-buffer cache, one SYNC6 calibration, track descriptors/TACH, 2-MiB allocation budgets, extensible directory and external programming workflow.
-- **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate and both-edge WR capture, 50-SYNC6 candidate format detection, structured sector replacement, asynchronous flash persistence and open power-cut/raw-track write gates. Future sections 13–18 are listed in Part 1's roadmap.
+- **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate and both-edge WR capture, 50-SYNC6 candidate format detection, structured sector replacement, asynchronous flash persistence and open power-cut/raw-track write gates.
+- **[06 — Part 5 / Section 13: Formatting, geometry and 400K compatibility](06-part-5-format-geometry-400k.md):** 400K/800K sector classes, side/format bytes, preserved interleave/sector identities, complete standard track reconstruction, seam and ROM format/Verify checks. Sections 14–18 remain on Part 1's roadmap.
 - `source/`: firmware and/or digital-logic implementation, pending architecture selection.
 - `kicad/`: schematics and PCB design.
 - `3d-drawing/`: mechanical CAD and cartridge/chassis models.
