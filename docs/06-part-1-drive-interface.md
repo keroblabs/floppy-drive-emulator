@@ -7,7 +7,7 @@
 **Implementation platform:** STM32 preferred; exact MCU, electrical buffers and timing architecture not yet chosen  
 **Last updated:** 9 November 2026
 
-> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates raw-GCR cartridge architecture, global SYNC6 calibration, logical track metadata and TACH. **Part 4 / Section 12** is reserved for serial writing; future sections become **13–18**. These numbers do not imply approval of outstanding implementation details.
+> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates raw-GCR cartridge architecture, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** now develops serial writing; future sections remain **13–18**. These numbers do not imply approval of outstanding implementation details.
 >
 > **Purpose:** Specify the *host-visible operations* of the Sony drive, not only its pinout. Check required operations against the Macintosh Plus ROM `.Sony` driver. A scaffold heading is a research plan, not an approved firmware requirement.
 >
@@ -75,7 +75,7 @@
    - [9.11 Verification and decisions](#911-verification-matrix-and-open-decisions)
 10. **[Serial GCR disk-data reading — Part 2](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading)** — developed in a separate document.
 11. **[Shared media architecture — Part 3](06-part-3-media-architecture.md#11-shared-raw-gcr-media-timing-and-cartridge-architecture)** — developed.
-12. **Serial write-data capture — Part 4 (planned)** — not created yet.
+12. **[Serial write-data capture — Part 4](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing)** — developed (gate, WR edges, RAM capture, sector writes and format).
 13–18. **[Future sections — roadmap](#continuation-and-future-parts)** — updated numbering.
 
 - [Continuation and future parts](#continuation-and-future-parts)
@@ -1312,23 +1312,23 @@ The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: t
 8. Verify that the physical design's *partial-eject position* does not accidentally requalify the same cartridge while still electrically connected.
 9. Keep software eject on the common LSTRB command interface with **pins 9 and 20 left unconnected**, independent of the chosen cable revision.
 
-**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), future Section 12 (write gating, capture, persistence), Section 14 (power-fail/media faults), Section 15 (electrical response timing), and Section 16 (STM32 state and peripherals).
+**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), [Section 12](06-part-4-serial-gcr-write.md) (write gate, capture and persistence requirements), Section 14 (power-fail/media faults), Section 15 (electrical response timing), and Section 16 (STM32 state and peripherals).
 
 ## Continuation and future parts
 
-This continuous protocol is split by responsibility. **Part 3 / Section 11** is inserted between the existing **Part 2 / Section 10** reading procedure and the now-planned **Part 4 / Section 12** writing procedure. Previously planned Sections 12–17 shift to **13–18**.
+This continuous protocol is split by responsibility. **Part 3 / Section 11** sits between **Part 2 / Section 10** reading and the now-developed **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** writing procedure. Earlier planned Sections 12–17 were shifted to **13–18**.
 
 - **[Section 10 — Serial GCR reading (Part 2)](06-part-2-serial-gcr-read.md#10-operation-serial-gcr-disk-data-reading):** detailed read path and freshly formatted stream.
 - **[Section 11 — Shared media, calibration and cartridge architecture (Part 3)](06-part-3-media-architecture.md#11-shared-raw-gcr-media-timing-and-cartridge-architecture):** current, agreed principles and open implementation questions.
-- **Section 12 — Serial GCR writing (Part 4):** planned and not yet created.
+- **[Section 12 — Serial GCR writing (Part 4)](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing):** developed, with hardware splice/flash persistence open.
 - **Sections 13–17:** additional protocol, electrical, implementation and verification work.
 - **Section 18:** future consolidated decision log; historical notes retained in the appendix.
 
 ### Preserved research scaffolds for planned Sections 12–17
 
-### Planned Section 12: Operation: serial write-data capture
+### Section 12: Operation: serial GCR writing — [developed in Part 4](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing)
 
-**TO DEVELOP.** WR (pin 18), /WRREQ (pin 10), valid write gating, IWM write/handshake modes, input-capture timing, captured raw bits, track position/splice, buffering, flash commit, write-protection and format distinction. Inspect ROM write/format paths. Respect [Part 3](06-part-3-media-architecture.md) decisions.
+Sony gate and both-edge WR capture, IWM write handshake, ROM sector writes, full-track format, SYNC6 calibration, RAM buffer design and persistence engineering gates are developed in [Part 4](06-part-4-serial-gcr-write.md). This is a navigation stub rather than a duplicate specification.
 
 ### Planned Section 13: Operation: format, sector geometry, sides and 400K compatibility
 
@@ -1377,6 +1377,7 @@ Future cross-part decision-log consolidation. Current Part 1 research notes rema
 
 ### Change history
 
+- **2026-11-09 (new Part 4):** Added [Part 4 / Section 12](06-part-4-serial-gcr-write.md) covering Sony WR **both-edge** behavior, gate/erase timing, ROM data-only sector writes vs formatting, and candidate STM32 capture, alignment and safe persistence, with unresolved splice and flash atomicity made explicit.
 - **2026-11-09 (new Part 3):** Added [Part 3 / Section 11](06-part-3-media-architecture.md) for the common raw-GCR, SYNC6 timing, logical-track, metadata and TACH contract. Shifted serial writing to Part 4 / Section 12, and deferred headings to 13–18. Removed physical-zone implementation language from the STM32 state model without removing host-visible TACH requirements.
 - **2026-11-09 (Section 9):** Developed Macintosh Plus disk-insertion, ROM VBL polling and first-access state; corrected the empty-drive `/WRTPRT=0` semantics and documented Sony's special empty-but-injected `/CSTIN` case; specified software eject timing, ROM post-eject suppression, logically ejected/physically retained cartridge state, qualification, write protection, flash-durability constraints and tests. Section 9 remains open for mechanical and storage-design implementation decisions.
 - **2026-11-06 (Section 8):** Added motor-control versus IWM drive-enable distinction, five authentic RPM zones and derived 60-pulse/revolution TACH rates, the ROM's **unexpected 800K ReSeek tach-speed validation**, /READY conditions and timing diagrams, automatic-insertion caveats, and STM32 timer/ready state model with validation tests. No physical spin-up or seek delays added as requirements.
