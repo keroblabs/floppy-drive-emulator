@@ -125,7 +125,7 @@ Documentation should distinguish **verified source facts**, **observations or me
 - [06 — Part 1 / Sections 1–9: Host interface and drive operations](06-part-1-drive-interface.md): selector, control/status, seek, TACH, readiness and eject.
 - [06 — Part 2 / Section 10: Serial GCR reading](06-part-2-serial-gcr-read.md): waveform, 6-and-2 track structure and freshly formatted track reference.
 - **[06 — Part 3 / Section 11: Shared media architecture](06-part-3-media-architecture.md):** settled raw-GCR representation, one SYNC6 calibration, per-track metadata, TACH contract, extensible SPI-flash directory and cartridge programming workflow.
-- **06 — Part 4 / Section 12:** serial writing (planned, not yet created). Future sections 13–18 are listed in Part 1's roadmap.
+- **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate, both-edge WR transitions, ROM sector writes and formatting, proposed STM32 capture/buffering and open splice/flash durability design. Future sections 13–18 are listed in Part 1's roadmap.
 - `source/`: firmware and/or digital-logic implementation, pending architecture selection.
 - `kicad/`: schematics and PCB design.
 - `3d-drawing/`: mechanical CAD and cartridge/chassis models.
