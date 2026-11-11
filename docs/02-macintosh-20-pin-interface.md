@@ -120,13 +120,15 @@ We have **not** decided which supplied rails the emulator circuitry will actuall
 
 The Sony specification includes original mechanical timing limits; these are **reference characteristics**, not automatically requirements for our emulator. Any necessary compatibility delay must be justified by documentation, observed IWM behaviour or a test.
 
-## 5. Explicitly unresolved engineering questions
+## 5. Remaining electrical and implementation questions (Section 15 developed)
+
+**[DEVELOPED]** Numeric Sony DC levels, RD tri-state/response, GCR pulse width and write/strobe/control timing are now specified in **[Document 06 — Part 7 / Section 15](06-part-7-electrical-timing.md)**. The host-specific pin map in this document remains authoritative. The points below are remaining **bench and circuit implementation tasks**; older research wording is retained where detailed physical values have now been established.
 
 1. Confirm **physical mating orientation**, keying, cable pin-1 identification and the exact M0001AP internal harness before prototype connection.
 2. Build the full **RD selector table and write-latch map**, including power-up, disable and media-change state transitions.
-3. Establish **numeric electrical input/output limits**, host termination/pull-ups, RD drive capability and safe voltage interfacing.
-4. Establish **exact GCR bitstream/timing requirements**, write gate/data qualification and tolerances.
-5. Check which host-observable **READY/TACH/drive-status sequencing**, if any, requires emulation of timing rather than immediate digital response.
+3. **Verify/implement** the numeric electrical limits already specified in [Section 15](06-part-7-electrical-timing.md#153-dc-logic-levels-loading-and-rd-output-drive), and measure actual Plus host termination/pull-ups, RD load and 5-V-safe interface margin.
+4. **Bench-check** the Section 15 RD/WR waveform and gate timing against the target IWM, including total buffer delay, pulse widths, gate phase and tolerances; protocol values are now documented.
+5. **Validate** READY/TACH and other host-visible statuses against Section 15 and the ROM without adding arbitrary mechanical wait time.
 6. Design reset, power loss, insertion/ejection, write-protection and **SPI flash cartridge hot-removal** semantics without exposing invalid states to the IWM.
 7. Validate the selected physical-drive revision and reconcile differences with the **MFD-51W-10 / MFD-51W-03** documents before considering any external DB-19 support.
 
