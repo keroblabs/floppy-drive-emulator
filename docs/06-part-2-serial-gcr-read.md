@@ -402,7 +402,7 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 - **[ROM]** Fresh format detail is specified in §10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
-- **[DECISION]** Write capture and flash persistence are in **[Part 4 §12](06-part-4-serial-gcr-write.md)**; standard track geometry, physical order, sector-0 origin and formatting/Verify are in **[Part 5 §13](06-part-5-format-geometry-400k.md)**.
+- **[DECISION]** Write capture and flash persistence are in **[Part 4 §12](06-part-4-serial-gcr-write.md)**; standard track geometry, physical order, sector-0 origin and formatting/Verify are in **[Part 5 §13](06-part-5-format-geometry-400k.md)**; **[Part 7 §15](06-part-7-electrical-timing.md)** consolidates host-facing voltage/drive, RD pulse and timing requirements.
 
 **Research/implementation gates before hardware selection:**
 
@@ -417,6 +417,8 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 9. Define the final boundary between **Part 2 read engine**, **Part 3 shared media state**, and **[Part 4 write capture](06-part-4-serial-gcr-write.md)**, including ownership of RD, track buffers and persistence.
 
 **Document history**
+
+- **2026-11-11:** Linked [Part 7 / §15](06-part-7-electrical-timing.md) for the consolidated 5-V electrical, RD tri-state/status response and serial pulse timing requirements; §10 remains authoritative for bit-level GCR stream structure.
 
 - **2026-11-09 (Section 14 scope update):** First release accepts structured standard 400K/800K GCR only; RAW_TRACK is reserved for later and must be rejected safely. ROM-verified read protocol remains unchanged.
 
