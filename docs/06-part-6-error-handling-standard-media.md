@@ -162,7 +162,7 @@ An ordinary write is incomplete/invalid when: gate terminates prematurely, WR tr
 - A standard **400K single-sided image in an 800K-capable drive** without fabricating side-1 recorded sectors.
 - Repeated format of the same track and immediate format check, valid retries, repeated ordinary-sector writes and ROM read/Verify retries.
 
-**[OPEN]** Exact gate/selection races and host-visible timeout/error interpretation must be verified against a real Plus (Section 15 electrical requirements; Section 17 validation).
+**[OPEN]** Exact gate/selection races and host-visible timeout/error interpretation must be verified against the real Plus using [Part 7 / §15 electrical requirements](06-part-7-electrical-timing.md) and future Section 17 validation.
 
 ### 14.13 Fault handling state model
 
