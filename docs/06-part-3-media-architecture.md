@@ -235,7 +235,9 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 
 **[Part 6 / §14 — standard-media fault handling](06-part-6-error-handling-standard-media.md):** Limits the initial firmware to standard 400K/800K media; defines missing/blank/protected media, incomplete writes, repeated writes, flash/cache failures, interrupted format, removal and eject.
 
-**Later work §§15–18:** Electrical timing; STM32 peripherals; acceptance; decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
+**[Part 7 / §15 — electrical/timing requirements](06-part-7-electrical-timing.md):** Consolidates safe 5-V host input/output, RD tri-state/mux and GCR waveform, WR capture and control/TACH/READY timing.
+
+**Later work §§16–18:** STM32/peripherals, acceptance tests and decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
 
 ### 11.11 Decisions, proposals and open questions
 
