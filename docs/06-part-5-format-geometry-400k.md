@@ -211,7 +211,7 @@ Format burst durations are **host transmission times**, not the logical revoluti
 
 **[DECISION]** The RD scheduler maintains a **continuously advancing phase** independently of the RAM buffer index zero. On head change, gate release or format-readback, publish the correct selected track/phase without blindly resetting the host-visible stream to sector-0's address mark. The ROM must encounter the proper **sync leading to sector 0** after the last formatted sector, allowing its immediate fit test to operate. This is stream-position bookkeeping, **not artificial mechanical rotation or rotational latency**.
 
-**[OPEN — verification only]** Exact bench timing/tolerance of the final SYNC6 return path, phase handoff at gate release and RD pulse-width/jitter require real-IWM loopback tests; none changes the agreed standard reconstruction contract.
+**[OPEN — verification only]** Exact bench timing/tolerance of the final SYNC6 return path, phase handoff at gate release and RD pulse-width/jitter require real-IWM loopback tests under [Part 7 / §15](06-part-7-electrical-timing.md); none changes the agreed standard reconstruction contract.
 
 ### 13.8 Macintosh ROM formatting and post-format verification
 
