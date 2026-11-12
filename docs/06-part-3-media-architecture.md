@@ -237,7 +237,9 @@ For a standard two-sided 800K disk there are 32 track/sides in each sector-count
 
 **[Part 7 / §15 — electrical/timing requirements](06-part-7-electrical-timing.md):** Consolidates safe 5-V host input/output, RD tri-state/mux and GCR waveform, WR capture and control/TACH/READY timing.
 
-**Later work §§16–18:** STM32/peripherals, acceptance tests and decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
+**[Part 8 / §16 — STM32 implementation architecture](06-part-8-stm32-implementation-architecture.md):** Candidate RD/WR timing hardware, ≥3-track DMA-safe SRAM allocation, flash-busy scheduling, COW/journal persistence, cartridge power/eject and validation gates.
+
+**Later work §§17–18:** Acceptance tests and decision log. Separate media/programmer design may expand the on-flash ABI, but must honour these agreed architectural requirements.
 
 ### 11.11 Decisions, proposals and open questions
 
