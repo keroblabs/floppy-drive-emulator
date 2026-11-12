@@ -122,7 +122,7 @@ The Sony specification includes original mechanical timing limits; these are **r
 
 ## 5. Remaining electrical and implementation questions (Section 15 developed)
 
-**[DEVELOPED]** Numeric Sony DC levels, RD tri-state/response, GCR pulse width and write/strobe/control timing are now specified in **[Document 06 — Part 7 / Section 15](06-part-7-electrical-timing.md)**. The host-specific pin map in this document remains authoritative. The points below are remaining **bench and circuit implementation tasks**; older research wording is retained where detailed physical values have now been established.
+**[DEVELOPED]** Numeric Sony DC levels, RD tri-state/response, GCR pulse width and write/strobe/control timing are now specified in **[Document 06 — Part 7 / Section 15](06-part-7-electrical-timing.md)**. **[Part 8 / Section 16](06-part-8-stm32-implementation-architecture.md)** now describes candidate STM32 timers, buffers, fast RD interface and flash/power architecture without approving a final circuit. The host-specific pin map in this document remains authoritative. The points below are remaining **bench and circuit implementation tasks**; older research wording is retained where detailed physical values have now been established.
 
 1. Confirm **physical mating orientation**, keying, cable pin-1 identification and the exact M0001AP internal harness before prototype connection.
 2. Build the full **RD selector table and write-latch map**, including power-up, disable and media-change state transitions.
