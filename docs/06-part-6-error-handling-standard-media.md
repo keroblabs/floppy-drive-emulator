@@ -139,7 +139,7 @@ An ordinary write is incomplete/invalid when: gate terminates prematurely, WR tr
 
 **[DECISION]** A dirty cache generation is durable only when the flash transaction and associated recoverable directory state have been verified. After a flash failure, preserve valid RAM while power exists, avoid further unsafe writes and transition to a documented write-disabled/fault state.
 
-**[OPEN]** Specific journal/COW/in-place-erase policy, wear/endurance, backlog bounds, metadata commit atomicity and crash recovery are Section 16 implementation work, with Section 17 fault-injection tests.
+**[OPEN]** Specific journal/COW/in-place-erase policy, wear/endurance, backlog bounds, metadata commit atomicity and crash recovery are [Part 8 §16](06-part-8-stm32-implementation-architecture.md) candidate implementation work, with Section 17 fault-injection tests.
 
 ### 14.11 Unexpected cartridge removal and safe eject
 
