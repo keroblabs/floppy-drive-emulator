@@ -6,7 +6,7 @@
 **Target:** Macintosh Plus M0001AP, original Plus ROM `.Sony` driver, IWM and host-facing Sony MFD-51W 800K interface  
 **Date:** 9 November 2026
 
-> **Position in the series:** [Part 1 / §§1–9](06-part-1-drive-interface.md) defines drive/status/control/eject and TACH; [Part 2 / §10](06-part-2-serial-gcr-read.md) defines the exact serial GCR stream and RD waveform; [Part 3 / §11](06-part-3-media-architecture.md) establishes the 32+703-byte sector records, RAW_TRACK alternative, global calibration and >=3 track buffers; [Part 4 / §12](06-part-4-serial-gcr-write.md) defines electrical WR capture, early format detection and asynchronous flash persistence. This part specifies **the complete standard logical track that those engines must reconstruct**. It does not repeat the electrical write protocol.
+> **Position in the series:** [Part 1 / §§1–9](06-part-1-drive-interface.md) defines drive/status/control/eject and TACH; [Part 2 / §10](06-part-2-serial-gcr-read.md) defines the exact serial GCR stream and RD waveform; [Part 3 / §11](06-part-3-media-architecture.md) establishes the 32+703-byte sector records, reserved RAW_TRACK ID, global calibration and >=3 track buffers; [Part 4 / §12](06-part-4-serial-gcr-write.md) defines electrical WR capture, early format detection and asynchronous flash persistence. This part specifies **the complete standard logical track that those engines must reconstruct**. It does not repeat the electrical write protocol.
 
 **Evidence notation:** **[ROM]** directly established by Plus ROM source; **[DECISION]** agreed emulator requirement; **[REFERENCE]** engineering computation from agreed reference values; **[OPEN]** implementation measurement or error/recovery detail, not a reopened disk-format decision.
 
@@ -211,7 +211,7 @@ Format burst durations are **host transmission times**, not the logical revoluti
 
 **[DECISION]** The RD scheduler maintains a **continuously advancing phase** independently of the RAM buffer index zero. On head change, gate release or format-readback, publish the correct selected track/phase without blindly resetting the host-visible stream to sector-0's address mark. The ROM must encounter the proper **sync leading to sector 0** after the last formatted sector, allowing its immediate fit test to operate. This is stream-position bookkeeping, **not artificial mechanical rotation or rotational latency**.
 
-**[OPEN — verification only]** Exact bench timing/tolerance of the final SYNC6 return path, phase handoff at gate release and RD pulse-width/jitter require real-IWM loopback tests under [Part 7 / §15](06-part-7-electrical-timing.md); none changes the agreed standard reconstruction contract.
+**[OPEN — verification only]** Exact bench timing/tolerance of the final SYNC6 return path, phase handoff at gate release and RD pulse-width/jitter require real-IWM loopback tests under [Part 7 / §15](06-part-7-electrical-timing.md), using candidate GCR timer/DMA pipelines in [Part 8 / §16](06-part-8-stm32-implementation-architecture.md); none changes the agreed standard reconstruction contract.
 
 ### 13.8 Macintosh ROM formatting and post-format verification
 
