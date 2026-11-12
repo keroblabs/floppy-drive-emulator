@@ -7,7 +7,7 @@
 **Implementation platform:** STM32 preferred; exact MCU, electrical buffers and timing architecture not yet chosen  
 **Last updated:** 9 November 2026
 
-> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** develops serial writing; **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)** develops standard formatting, track reconstruction and 400K compatibility; **[Part 6 / Section 14](06-part-6-error-handling-standard-media.md)** establishes standard-media error/interrupt handling; **[Part 7 / Section 15](06-part-7-electrical-timing.md)** specifies host-facing electrical and timing requirements; future sections remain **16–18**. These numbers do not imply approval of outstanding implementation details.
+> **Document organisation (9 November 2026):** This is **Part 1**, containing numbered Sections **1–9**. **[Part 2 / Section 10](06-part-2-serial-gcr-read.md)** develops serial reading. **[Part 3 / Section 11](06-part-3-media-architecture.md)** consolidates structured encoded-GCR sector storage plus RAW_TRACK compatibility, >=3 complete-track RAM buffers, global SYNC6 calibration, logical track metadata and TACH. **[Part 4 / Section 12](06-part-4-serial-gcr-write.md)** develops serial writing; **[Part 5 / Section 13](06-part-5-format-geometry-400k.md)** develops standard formatting, track reconstruction and 400K compatibility; **[Part 6 / Section 14](06-part-6-error-handling-standard-media.md)** establishes standard-media error/interrupt handling; **[Part 7 / Section 15](06-part-7-electrical-timing.md)** specifies host-facing electrical and timing requirements; **[Part 8 / Section 16](06-part-8-stm32-implementation-architecture.md)** develops hardware/firmware architecture; future sections remain **17–18**. These numbers do not imply approval of outstanding implementation details.
 >
 > **Purpose:** Specify the *host-visible operations* of the Sony drive, not only its pinout. Check required operations against the Macintosh Plus ROM `.Sony` driver. A scaffold heading is a research plan, not an approved firmware requirement.
 >
@@ -1312,7 +1312,7 @@ The **`PRESENT_READY` name is not sufficient by itself** to assert `/READY=0`: t
 8. Verify that the physical design's *partial-eject position* does not accidentally requalify the same cartridge while still electrically connected.
 9. Keep software eject on the common LSTRB command interface with **pins 9 and 20 left unconnected**, independent of the chosen cable revision.
 
-**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), [Section 12](06-part-4-serial-gcr-write.md) (write gate, capture and persistence requirements), [Section 13](06-part-5-format-geometry-400k.md) (standard track reconstruction, geometry and 400K/800K formatting), [Section 14](06-part-6-error-handling-standard-media.md) (media/flash faults), [Section 15](06-part-7-electrical-timing.md) (5-V electrical and timing), and Section 16 (STM32 state and peripherals).
+**Related sections:** Section 10 (GCR reading and blank/unformatted media), [Section 11](06-part-3-media-architecture.md) (raw-GCR media, calibration, logical track metadata), [Section 12](06-part-4-serial-gcr-write.md) (write gate, capture and persistence requirements), [Section 13](06-part-5-format-geometry-400k.md) (standard track reconstruction, geometry and 400K/800K formatting), [Section 14](06-part-6-error-handling-standard-media.md) (media/flash faults), [Section 15](06-part-7-electrical-timing.md) (5-V electrical and timing), and [Section 16](06-part-8-stm32-implementation-architecture.md) (STM32 state and peripherals).
 
 ## Continuation and future parts
 
@@ -1324,10 +1324,11 @@ This continuous protocol is split by responsibility. **Part 3 / Section 11** sit
 - **[Section 13 — Format, sector geometry, sides and 400K compatibility (Part 5)](06-part-5-format-geometry-400k.md#13-operation-format-sector-geometry-sides-and-400k-compatibility):** developed; standard 400K/800K geometry, preserved sector order, structured GCR reconstruction, seam and ROM verification.
 - **[Section 14 — Standard-media errors and unexpected sequences (Part 6)](06-part-6-error-handling-standard-media.md#14-error-handling-and-unexpected-sequences):** developed; robust normal-operation failures, safe media transitions and first-release format limits.
 - **[Section 15 — Electrical requirements and timing (Part 7)](06-part-7-electrical-timing.md#15-electrical-requirements-and-timing):** developed; Plus-specific 20-pin interface, DC thresholds, RD timing and tri-state, WR/LSTRB/STEP, TACH, supply safety.
-- **Sections 16–17:** STM32 implementation and validation remain planned.
+- **[Section 16 — STM32 implementation architecture (Part 8)](06-part-8-stm32-implementation-architecture.md#16-stm32-implementation-architecture):** developed; candidate MCU, real-time selector/RD pulse/WR DMA, memory/cache and SPI NOR/persistence design.
+- **Section 17:** validation and acceptance remains planned.
 - **Section 18:** future consolidated decision log; historical notes retained in the appendix.
 
-### Developed Sections 12–15 and planned Sections 16–17
+### Developed Sections 12–16 and planned Section 17
 
 ### Section 12: Operation: serial GCR writing — [developed in Part 4](06-part-4-serial-gcr-write.md#12-operation-serial-gcr-writing)
 
@@ -1343,11 +1344,11 @@ Standard 400K/800K image-only first-release scope and errors on otherwise normal
 
 ### Section 15: Electrical requirements and timing — [developed in Part 7](06-part-7-electrical-timing.md#15-electrical-requirements-and-timing)
 
-Apple's Macintosh Plus Table 9-3 and Sony 699-0452-A 800K electrical/timing diagrams are consolidated in [Part 7](06-part-7-electrical-timing.md). It specifies correct 20-pin host rails/pins (including **disconnected −12 V pin 9 and PWM pin 20**), 5-V-era thresholds/load, RD source selection/high impedance and pulse widths, WR capture/write gate, LSTRB/STEP/READY/TACH/eject timing and safe power. Implementation remains Section 16.
+Apple's Macintosh Plus Table 9-3 and Sony 699-0452-A 800K electrical/timing diagrams are consolidated in [Part 7](06-part-7-electrical-timing.md). It specifies correct 20-pin host rails/pins (including **disconnected −12 V pin 9 and PWM pin 20**), 5-V-era thresholds/load, RD source selection/high impedance and pulse widths, WR capture/write gate, LSTRB/STEP/READY/TACH/eject timing and safe power. Detailed candidate implementation is in [Section 16](06-part-8-stm32-implementation-architecture.md).
 
-### Planned Section 16: STM32 implementation architecture
+### Section 16: STM32 implementation architecture — [developed in Part 8](06-part-8-stm32-implementation-architecture.md#16-stm32-implementation-architecture)
 
-**TO DEVELOP.** Selector logic, LSTRB capture, RD mux, GCR timer/DMA, WR transition capture, shared track position, global calibration, removable SPI flash cache/persistence, timing priorities and jitter. No specific STM32 device approved yet.
+Candidate STM32H723ZG and other packages, fast RD selector and high-Z, DMA-driven read pulse/WR both-edge pipelines, three complete track buffers, DMA-aware SRAM mapping, flash suspend/cache concurrency, COW/journal persistence proposal, power/contacts/eject and measured selection gates are documented in [Part 8](06-part-8-stm32-implementation-architecture.md). **No MCU, BOM, pinmux, circuit or flash transaction implementation has yet been approved.**
 
 ### Planned Section 17: Validation and acceptance tests
 
