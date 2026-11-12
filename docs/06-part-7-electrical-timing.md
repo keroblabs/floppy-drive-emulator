@@ -6,7 +6,7 @@
 **Target:** Original Macintosh Plus M0001AP **internal 20-pin** connector, emulating an internal Sony **MFD-51W 800K** mechanism  
 **Date:** 11 November 2026
 
-> **Document sequence:** [Document 02 — 20-pin connector](02-macintosh-20-pin-interface.md) is the authoritative host-specific pin assignment; [Part 1 / §§1–9](06-part-1-drive-interface.md) specifies selector/status/control, TACH, steps, READY and eject; [Part 2 / §10](06-part-2-serial-gcr-read.md) specifies GCR RD; [Part 3 / §11](06-part-3-media-architecture.md) specifies buffering and storage; [Part 4 / §12](06-part-4-serial-gcr-write.md) specifies WR capture; [Part 5 / §13](06-part-5-format-geometry-400k.md) specifies ROM-compatible tracks; [Part 6 / §14](06-part-6-error-handling-standard-media.md) specifies standard-media faults. **This section addresses only host-facing electrical characteristics, waveform constraints, safe interfacing and measurable acceptance.** [Part 8 / §16](06-part-1-drive-interface.md#planned-section-16-stm32-implementation-architecture) will choose the MCU/peripherals, buffers, supplies and firmware arrangement.
+> **Document sequence:** [Document 02 — 20-pin connector](02-macintosh-20-pin-interface.md) is the authoritative host-specific pin assignment; [Part 1 / §§1–9](06-part-1-drive-interface.md) specifies selector/status/control, TACH, steps, READY and eject; [Part 2 / §10](06-part-2-serial-gcr-read.md) specifies GCR RD; [Part 3 / §11](06-part-3-media-architecture.md) specifies buffering and storage; [Part 4 / §12](06-part-4-serial-gcr-write.md) specifies WR capture; [Part 5 / §13](06-part-5-format-geometry-400k.md) specifies ROM-compatible tracks; [Part 6 / §14](06-part-6-error-handling-standard-media.md) specifies standard-media faults. **This section addresses only host-facing electrical characteristics, waveform constraints, safe interfacing and measurable acceptance.** [Part 8 / §16](06-part-8-stm32-implementation-architecture.md) develops candidate MCU, peripherals, buffers, supplies and firmware arrangement **without yet approving the exact BOM or pinmux**.
 
 **Source keys:** **[APPLE]** Macintosh Plus connector/power in Apple's *Guide to the Macintosh Family Hardware*, second edition, chapter 9, table 9-3; **[SONY]** Apple/Sony **699-0452-A**, *800K Double-Sided Drive Engineering Requirements Specification* (September 1986), especially §§2.3, 3.1–3.6, the cited drawing sheets; **[ROM]** Macintosh Plus Sony driver; **[DECISION]** approved emulator requirement; **[PROPOSED]** suggested circuit/engineering practice; **[OPEN]** not yet measured or selected. **Do not transfer 400K or external-drive pin assignments into the internal MFD-51W design.**
 
@@ -270,7 +270,7 @@ SPI flash on removable cartridge <-> independent background storage worker
 
 **[DECISION]** Keep **at least three complete >=12-KiB track buffers**, separate capture DMA/rings and asynchronous flash worker, as previously agreed. Present a reconstructed standard ROM-compatible track; no raw nonstandard/copy-protection playback is required in the first release (Part 6 §14).
 
-**[OPEN]** Specific STM32 part, available timers/input capture/DMA, glue-logic size, clock synchronization, buffer OE and RD serializer circuit are the purpose of Section 16. This section intentionally does **not** approve an MCU part number, pin assignment, schematic or PCB layout.
+**[OPEN]** Candidate MCU/timer/DMA, glue logic, buffer OE and serializer paths are evaluated in [Part 8 §16](06-part-8-stm32-implementation-architecture.md); actual choice and measured proof are still outstanding. This section intentionally does **not** approve an MCU part number, pin assignment, schematic or PCB layout.
 
 ### 15.13 Bench verification and acceptance matrix
 
@@ -323,5 +323,7 @@ SPI flash on removable cartridge <-> independent background storage worker
 6. Power-fail/dirty-cache-safe eject within host-compatible timing; connector physical orientation and sensor/release strategy.
 
 **Document history**
+
+- **2026-11-12:** Linked [Part 8 §16](06-part-8-stm32-implementation-architecture.md) as the candidate hardware/firmware response to this section's electrical requirements; did not change numeric interface limits.
 
 - **2026-11-11:** Created Part 7 / §15 from Apple Macintosh Plus Table 9-3 and Apple/Sony 699-0452-A sheets 21–32/35, reconciled with existing Part 1 and Part 2 measurements/specification tables. Locked 5 V-era electrical levels and high-Z/fast RD requirements, 489,600-bit/s serial timing, WR edge/gate characteristics, strobe/step/READY/TACH/eject constraints, and clean Section 16 implementation boundary.
