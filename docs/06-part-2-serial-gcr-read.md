@@ -402,7 +402,7 @@ The precise bit-cell clock, pulse polarity, high/low levels under inactive read 
 - **[ROM]** Fresh format detail is specified in §10.6: 200 transient lead-in groups, per-sector GapSync groups, exact address/data pad bytes, 703 `$96` formatted-data codewords and 2:1 interleave.
 - **[DECISION]** No mechanical or acoustic simulation and no deliberately added rotational/seek delays solely for realism.
 - **[DECISION]** No connection to host pins 9 or 20.
-- **[DECISION]** Write capture and flash persistence are in **[Part 4 §12](06-part-4-serial-gcr-write.md)**; standard track geometry, physical order, sector-0 origin and formatting/Verify are in **[Part 5 §13](06-part-5-format-geometry-400k.md)**; **[Part 7 §15](06-part-7-electrical-timing.md)** consolidates host-facing voltage/drive, RD pulse and timing requirements.
+- **[DECISION]** Write capture and flash persistence are in **[Part 4 §12](06-part-4-serial-gcr-write.md)**; standard track geometry, physical order, sector-0 origin and formatting/Verify are in **[Part 5 §13](06-part-5-format-geometry-400k.md)**; **[Part 7 §15](06-part-7-electrical-timing.md)** consolidates host-facing voltage/drive, RD pulse and timing requirements; **[Part 8 §16](06-part-8-stm32-implementation-architecture.md)** presents candidate timed RD shifter+strobe or compare/DMA output engines and the DMA-aware RAM mapping.
 
 **Research/implementation gates before hardware selection:**
 
