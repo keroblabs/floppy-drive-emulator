@@ -128,7 +128,8 @@ Documentation should distinguish **verified source facts**, **observations or me
 - **[06 — Part 4 / Section 12: Serial GCR writing](06-part-4-serial-gcr-write.md):** Sony write gate and both-edge WR capture, 50-SYNC6 candidate format detection, structured sector replacement, asynchronous flash persistence and open power-cut/raw-track write gates.
 - **[06 — Part 5 / Section 13: Formatting, geometry and 400K compatibility](06-part-5-format-geometry-400k.md):** 400K/800K sector classes, side/format bytes, preserved interleave/sector identities, complete standard track reconstruction, seam and ROM format/Verify checks.
 - **[06 — Part 6 / Section 14: Standard-media error handling](06-part-6-error-handling-standard-media.md):** first-release standard-image-only scope, absent/blank/protected media, interrupted writes/formatting, retries, flash/cache faults and safe removal.
-- **[06 — Part 7 / Section 15: Electrical requirements and timing](06-part-7-electrical-timing.md):** Plus internal 20-pin rails, Sony TTL thresholds, RD true high-Z/fast mux, sub-µs GCR pulses, WR gate/edges, LSTRB/STEP/TACH/READY and safe power. Sections 16–18 remain planned.
+- **[06 — Part 7 / Section 15: Electrical requirements and timing](06-part-7-electrical-timing.md):** Plus internal 20-pin rails, Sony TTL thresholds, RD true high-Z/fast mux, sub-µs GCR pulses, WR gate/edges, LSTRB/STEP/TACH/READY and safe power.
+- **[06 — Part 8 / Section 16: STM32 implementation architecture](06-part-8-stm32-implementation-architecture.md):** candidate STM32H723, hardware-timed RD/WR engines, full-track SRAM/DMA budget, flash-busy arbitration, recoverable write proposals, power/eject design and prototype gates. Sections 17–18 remain planned.
 - `source/`: firmware and/or digital-logic implementation, pending architecture selection.
 - `kicad/`: schematics and PCB design.
 - `3d-drawing/`: mechanical CAD and cartridge/chassis models.
