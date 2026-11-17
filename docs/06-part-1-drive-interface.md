@@ -1348,7 +1348,7 @@ Apple's Macintosh Plus Table 9-3 and Sony 699-0452-A 800K electrical/timing diag
 
 ### Section 16: STM32 implementation architecture — [developed in Part 8](06-part-8-stm32-implementation-architecture.md#16-stm32-implementation-architecture)
 
-Candidate STM32H723ZG and other packages, fast RD selector and high-Z, DMA-driven read pulse/WR both-edge pipelines, three complete track buffers, DMA-aware SRAM mapping, flash suspend/cache concurrency, COW/journal persistence proposal, power/contacts/eject and measured selection gates are documented in [Part 8](06-part-8-stm32-implementation-architecture.md). **No MCU, BOM, pinmux, circuit or flash transaction implementation has yet been approved.**
+**Preferred ATF1508 + STM32F411 architecture**, 19.584-MHz reference and CPLD-controlled SPI-slave GCR output, fast RD status/high-Z, WR both-edge timer/DMA, three complete track buffers, F411-specific 128-KiB SRAM budgeting, flash suspend/cache concurrency, COW/journal persistence proposal and electrical/power validation gates are documented in [Part 8](06-part-8-stm32-implementation-architecture.md). **Exact part suffixes, pinmux, timing fit, circuit and flash transaction implementation remain unapproved until tested.**
 
 ### Planned Section 17: Validation and acceptance tests
 
