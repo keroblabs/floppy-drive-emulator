@@ -1,14 +1,14 @@
-# Sony MFD-51W Drive Interface Protocol — Part 8: STM32 Implementation Architecture
+# Sony MFD-51W Drive Interface Protocol — Part 8: ATF1508 + STM32F411 Implementation Architecture
 
 **Document:** 06 — Part 8  
 **Protocol section:** **16 — STM32 implementation architecture**  
-**Status:** Proposed implementation architecture grounded in approved requirements; MCU, pinmux, circuit, read engine and flash-commit algorithm **not yet approved**  
+**Status:** **Preferred development architecture: 5-V ATF1508-family CPLD + STM32F411**; exact suffixes/packages, CPLD fit, pinmux, signals, flash recovery and PCB not yet approved  
 **Target:** Macintosh Plus M0001AP internal 20-pin Sony MFD-51W emulator  
-**Date:** 12 November 2026
+**Revised:** 17 November 2026
 
-> **Sequence:** [Document 02](02-macintosh-20-pin-interface.md) owns the internal connector; [Part 1 / Sections 1–9](06-part-1-drive-interface.md) drive control/status; [Part 2 / Section 10](06-part-2-serial-gcr-read.md) GCR read stream; [Part 3 / Section 11](06-part-3-media-architecture.md) sector records and cartridge; [Part 4 / Section 12](06-part-4-serial-gcr-write.md) WR capture and persistence; [Part 5 / Section 13](06-part-5-format-geometry-400k.md) standard reconstruction; [Part 6 / Section 14](06-part-6-error-handling-standard-media.md) faults; [Part 7 / Section 15](06-part-7-electrical-timing.md) electrical timing. **This Section 16 maps those fixed contracts to candidate hardware and firmware.** Future Section 17 validates them.
+> **Sequence:** [Document 02](02-macintosh-20-pin-interface.md) owns the internal connector; [Part 1 / Sections 1–9](06-part-1-drive-interface.md) drive control/status; [Part 2 / Section 10](06-part-2-serial-gcr-read.md) GCR read stream; [Part 3 / Section 11](06-part-3-media-architecture.md) sector records and cartridge; [Part 4 / Section 12](06-part-4-serial-gcr-write.md) WR capture and persistence; [Part 5 / Section 13](06-part-5-format-geometry-400k.md) standard reconstruction; [Part 6 / Section 14](06-part-6-error-handling-standard-media.md) faults; [Part 7 / Section 15](06-part-7-electrical-timing.md) electrical timing. **This Section 16 maps the fixed requirements to the preferred ATF1508 + STM32F411 hardware architecture.** Future Section 17 validates them.
 
-**Labels:** **[DECISION]** settled project requirement; **[SOURCE]** published specification; **[CANDIDATE]** implementation proposal to investigate; **[OPEN]** unresolved selection or measurement. A candidate is not a finalized BOM, pinmux or PCB.
+**Labels:** **[DECISION]** settled project requirement; **[SOURCE]** published specification; **[PREFERRED]** selected design direction, not yet proven hardware; **[CANDIDATE]** an alternative; **[OPEN]** unresolved engineering gate. A candidate is not a finalized BOM, pinmux or PCB.
 
 ## Contents
 
@@ -56,107 +56,104 @@
 
 ### 16.2 Proposed hardware blocks
 
+**[PREFERRED]** Divide responsibilities: the **ATF1508** is the deterministic Sony electrical/timing front end; the **STM32F411** owns structured track data, sector/format validation, SPI-slave DMA transmit, write input capture and removable NOR-flash persistence.
+
 ~~~text
-                MACINTOSH PLUS ORIGINAL IWM
-                INTERNAL 20-PIN DRIVE CONNECTOR
-  PH0 PH1 PH2 SEL PH3  /ENBL  /WRREQ WR       RD
-          |                |       |          ^
-          v                v       v          |
-    5-V-safe input    fast enable    both-edge timer
-          |           protection     + capture DMA
-          v                |             |
-    fast selector     RD output-OE        v
-    (status/data)          |         timestamp ring
-          ^                |             |
-          |                |             v
-      status latches       |       WR field parser
-          ^                |       and validator
-          |                |             |
-       STM32 state <-------+-------------+
-          ^                              
-          |             >=3 FULL CYCLIC TRACK SRAM BUFFERS
-   TACH timer and          ^                |
-   command timers          |                v
-          |          track constructor   GCR serializer
-          |          with 735-byte       + pulse shaper
-          |          sector records           |
-          +-------> fast RD status/data mux <-+
-                            |
-                    tri-state 5-V RD driver
-                            |
-                        PIN 16 RD
-
-          priority-aware SPI NOR worker / track directory
-                          |
-          removable 3.3-V 2-MiB SPI flash cartridge
-
-RD enable/status selection and pulse/WR timing must not
-wait for foreground firmware or flash erase/program.
+Macintosh Plus IWM — internal MFD-51W 20-pin connector
+  PH0/1/2 PH3 SEL /ENBL /WRREQ WR             RD pin 16
+       |                                       ^
+       v                                       |
+     ATF1508 CPLD + 19.584-MHz reference -------+
+     +-------------------------------------------+
+     | ÷40 GCR cell clock = 489,600 Hz           |
+     | SPI SCK/NSS control and MISO bit sampling |
+     | RD pulse = 10 oscillator ticks per 1 bit  |
+     | fast Sony status/RD selector and true OE  |
+     | LSTRB/STEP/TACH status timing             |
+     | MCU event and state/READY handshake       |
+     +-----------------+-------------------------+
+                       |  SPI SCK/NSS; F411 sends MISO
+                       v
+                STM32F411 (3.3 V)
+     +-------------------------------------------+
+     | SPI slave TX + circular DMA               |
+     | ≥3 independent ≥12-KiB GCR track buffers |
+     | TIM2/TIM5 both-edge WR capture proposal   |
+     | track assembly and flash directory        |
+     | separate SPI master for 2-MiB cartridge   |
+     +-----------------+-------------------------+
+                       |
+                 SPI NOR cartridge
 ~~~
 
-**[CANDIDATE]** Use one STM32 to coordinate drive state, sector reconstruction, DMA and storage, with **a small external fast-mux/level-buffer stage** where needed for genuine ≤0.5-µs RD selection and fail-safe high-Z. A CPLD/FPGA is **not** a current requirement. If the MCU timer/serial-shifter experiment fails timing, evaluate narrowly scoped glue logic rather than silently relaxing the specification.
+**[DECISION]** The IWM remains in the Macintosh. The STM32 sends *already encoded* GCR track bits; the CPLD does **not** perform 6-and-2 decoding or encoding. It converts serial 1 bits into timed RD pulses. The 4× expanded-SPI scheme is therefore unnecessary in this preferred architecture.
+
+**[OPEN]** Confirm ATF1508 exact suffix, package/pin count and available macrocells before fixing the MCU-CPLD control bus or PCB. The whole design must pass a CPLD fitter and timing analysis.
 
 ### 16.3 Candidate STM32 and peripheral selection gate
 
-**[CANDIDATE]** Investigate the **STM32H723ZG** first. ST's published product information lists **Cortex-M7 up to 550 MHz**, **1 MiB embedded flash**, **564 KiB total SRAM**, numerous timer/capture channels, DMA controllers and **two Octo-SPI interfaces**. This combination appears ample for the proposed full-track cache and independent signal engines, but no MCU has yet been selected.
+**[PREFERRED]** **STM32F411xC/xE** replaces F407 and H723 as the leading MCU family. ST specifies a **100-MHz Cortex-M4F**, **128 KiB SRAM**, 256 KiB embedded Flash for xC or 512 KiB for xE, two 32-bit timers, two DMA controllers, and up to five SPI/I2S peripherals. Availability of individual peripheral pins depends on the exact package. The F411 has **no F407-style extra 64-KiB CCM RAM**.
 
-Sources: [ST STM32H723ZG product](https://www.st.com/en/microcontrollers-microprocessors/stm32h723zg.html), [STM32H723 family datasheet](https://www.st.com/resource/en/datasheet/stm32h723ze.pdf).
+Sources: [STM32F411 product family](https://www.st.com/en/microcontrollers-microprocessors/stm32f411.html), [STM32F411xC/E datasheet](https://www.st.com/content/ccc/resource/technical/document/datasheet/b3/a5/46/3b/b4/e5/4c/85/DM00115249.pdf/files/DM00115249.pdf/jcr%3Acontent/translations/en.DM00115249.pdf), [RM0383 reference manual](https://www.st.com/resource/en/reference_manual/rm0383-stm32f411xce-advanced-armbased-32bit-mcus-stmicroelectronics.pdf).
 
-**[OPEN — MCU approval prerequisite]** Verify the *exact package* and every peripheral combination with ST's reference manual and CubeMX/pinmux, not merely a feature list:
+**[PREFERRED]** One external **19.584-MHz precision oscillator** clocks the CPLD. The CPLD divides by **40** to provide **489,600-Hz SPI SCK** to the F411 slave. A buffered voltage-compatible copy may also supply the F411 HSE bypass input, but the MCU's SPI-slave clock **does not depend on its PLL or SPI baud prescaler**.
 
-- Input path for four selector bits and LSTRB, ensuring fast status multiplexing and correctly qualified commands.
-- A real-time RD serializer with pulse shaping and true host enable gating.
-- Timer channels capturing **both WR edges**, preferably tied to a 32-bit free-running timestamp counter, plus gate timing.
-- Independent timer for 394–590-Hz TACH and bounded STEP feedback.
-- DMA channels that can operate simultaneously with RD, WR, SPI and eventual debugging.
-- A DMA-accessible SRAM map, cache-coherency plan and clock tree able to produce one accurate **489,600-bit/s** nominal cell rate.
-- Complete 5-V input-output electrical interface, cartridge SPI pin group, SWD and reset/boot/power supervisors.
-- Host and cartridge rail consumption under worst-case operating and power-fail conditions.
+**[CANDIDATE PLL illustration]** HSE 19.584 MHz, PLLM 12, PLLN 122, PLLP 2 would yield **99.552-MHz SYSCLK**, APB1 /2 **49.776 MHz**, and APB2 /1 **99.552 MHz**. Check the actual PLL constraints, power/flash latency and whether USB is needed before adopting; this illustration does not guarantee an exact USB 48-MHz clock.
 
-**[DECISION]** MCU selection is **not determined by core MHz or nominal SRAM capacity alone**. A smaller STM32 or an alternate H7 package can be compared, but the first candidate must pass the timing/pinmux matrix before committing a BOM or KiCad layout.
+**[OPEN]** Verify the actual part's complete top marking (CE/RE/VE or other variant and package), SPI-slave TX plus independent SPI NOR master pin groups, DMA streams, TIM2/TIM5 both-edge capture, SWD, CPLD control/status pins, and supply/reset. In a 48-pin package pin availability could be the decisive limit. **100 MHz and 128 KiB are feasibility constraints, not a demonstrated performance pass.**
 
 ### 16.4 Fast RD selector and electrical isolation
 
-**[DECISION]** Host PH0–PH3, SEL, /ENBL, /WRREQ and WR are **5-V-era inputs**; choose genuine compatible receivers/translators. Only RD is driven to the host. The RD driver must meet the voltage/current limits in Section 15, multiplex status and pulse sources, and become **high impedance within 0.5 µs** after /ENBL goes inactive, including during reset or a stalled MCU.
+**[PREFERRED]** Use ATF1508 logic to select ROM-defined Sony status or GCR RD, respond promptly to PH0/PH1/PH2/SEL and qualify PH3/LSTRB control writes. The CPLD's /ENBL path must force **RD high impedance within 0.5 µs** independently of STM32 interrupts, firmware reset or flash operations.
 
-**[CANDIDATE]** Store the current drive/status bits in low-latency latches or stable hardware-visible state; apply a fast 16-selection mux to those bits and the live GCR signal. Host selector changes must respond in the Section 15 window without depending on a slow MCU GPIO polling loop. Have an asynchronous gate from /ENBL directly to RD output enable. Selecting a status must never produce a STEP/EJECT command: **LSTRB rising edge is the command event**.
+**[DECISION]** Internal Macintosh Plus **pin 9 (−12 V)** and **pin 20 (PWM)** remain completely unconnected. RD is the single drive output at pin 16, with Section 15's output drive, thresholds, pulse width and true high-Z requirements.
 
-**[OPEN]** The chosen logic ICs, thresholds, propagation delay, output drive, high-Z turn-off, line loading and power-off behaviour require a complete **host-connector-to-RD measurement**, not merely a timer register simulation. Validate the physical host's input levels with high-impedance instrumentation.
+**[OPEN]** The spare ATF1508 is reportedly a **5-V model**; confirm its full suffix and datasheet. A 5-V **core** does **not** mean direct CPLD outputs are safe for F411 3.3-V inputs. Select VCCIO and/or level translators, an RD tri-state output stage if needed, and verified power-up defaults. Prove all buffer propagation and RD loading at the actual host connector.
+
+**[PREFERRED]** CPLD status registers should receive validated MCU state through a bounded handshake, avoiding glitches on READY, presence, protection, step feedback and selected track status. Do not allow a slow MCU poll to determine RD selector timing.
 
 ### 16.5 Serial GCR RD generation
 
-**[DECISION]** The read engine outputs a fully reconstructed cyclic standard GCR stream from a **≥12-KiB RAM buffer**. A recorded **1** bit produces an **RD pulse**; a 0 does not. Each bit cell lasts nominally **2.042484 µs**, but a pulse must be only **0.3–0.8 µs** wide. The read playback phase advances independently of the logical buffer origin at sector 0.
+**[PREFERRED]** Continuous **SPI-slave GCR transmission** is clocked by the CPLD. The F411 sends the full reconstructed standard track bitstream, from a DMA buffer, on SPI **MISO**. The CPLD supplies **SCK**, samples each bit at a proven phase and generates one narrow Sony RD pulse for every 1 bit; 0 produces no pulse.
 
-Two **candidate alternatives**, neither yet approved:
+| Parameter | Nominal value |
+|---|---:|
+| External precision reference | **19,584,000 Hz** |
+| CPLD clock divider | **÷40** |
+| SPI/GCR bit-cell clock | **489,600 Hz** |
+| Bit-cell duration | **2.042484 µs** |
+| RD pulse from 10 oscillator ticks | **0.510621 µs** |
+| SPI-slave DMA data throughput | **61,200 bytes/s** |
+| Example circular DMA TX buffer | **2 KiB**, two **1-KiB** halves |
+| Available refill time per half | **16.732 ms** |
 
-**A — DMA-driven synchronous bit shifter and narrow hardware strobe.** A SPI/USART-synchronous shifter or comparable serial peripheral emits one bit per calibrated cell, while a synchronized **narrow strobe** gates the bit value into a real RD pulse, even for consecutive 1 bits. A raw SPI MOSI waveform holding high for a whole bit cell, or its standard half-cycle clock pulse, is **not** automatically a compliant 0.3–0.8-µs RD output. Prove setup/hold and pulse shape, DMA refill, wrap phase, and **non-byte-aligned final circular bit length** handling. An 8-bit serial shifter transfers approximately **61,200 bytes/s** at nominal clock.
+**[PREFERRED]** Start with MSB-first SPI slave and an experimentally determined CPOL/CPHA/NSS scheme (SPI mode 0 is only a candidate). The CPLD must **not start the serial clock before the first transmit byte is prepared**. Continuous ready-state clocking must not introduce repeated, missing or stale bytes on DMA half-transfer and transfer-complete events.
 
-**B — Timer-output-compare with DMA pulse-event queue.** Scan the prepared cyclic bitstream into a bounded ahead-of-time pulse-position queue. Timer compare and hardware pulse-width logic emit pulses without a CPU ISR for each pulse. The worst-case event rate approaches **489,600 events/s**; test DMA refill, bus contention, timer register update semantics and seamless wrap.
+**[DECISION]** Adjacent 1 bits each produce a distinct pulse. The 10-tick pulse meets the **0.3–0.8-µs** Sony width requirement before output-stage distortion. Host RD selection and /ENBL tri-state are separate CPLD functions, not SPI output pins directly wired to the Macintosh.
 
-**[DECISION]** The chosen method must satisfy pulse width, position, exact SYNC6/gap content, absence of missing/extra transitions, status-source selection and uninterrupted timing during SPI flash operations. Use **one global calibrated GCR cell clock**, never five per-zone data clocks. Do not assume hardware SPI can implement arbitrary bit-count wrapping without additional logic.
+**[DECISION]** Logical circular track address zero remains **sector 0**, with an independent live playback phase. A track bit length that is not byte-aligned requires software to **repack across the seam without inserting pad bits**. Readback immediately after formatting, phase coherence when switching tracks, and READY qualification are unchanged from Sections 12–15.
+
+**[OPEN]** Prove first-bit setup/NSS behavior, F411 SPI underrun characteristics, seamless DMA refill, non-byte-aligned wrapping, CPLD MISO sampling phase, actual RD pulse timing and valid output source switching. The former F407 4× SPI-master scheme and timer-event engines are fallback alternatives, not the current preference.
 
 ### 16.6 WR both-edge capture and decoding
 
-**[DECISION]** Macintosh WR is **level-transition encoded**; **both rising and falling** transitions represent data. Qualify the capture by /WRREQ, host enable, selected cartridge/side and protection. WR capture must not depend on SPI operations or per-edge CPU interrupts.
+**[PREFERRED]** The STM32F411 timestamps **both rising and falling** WR data transitions using TIM2 or TIM5 (32-bit timers) and DMA. Gate state comes from qualified /WRREQ, with target cartridge, track, side and virtual RD phase latched for write decoding.
 
-**[CANDIDATE]** A free-running **32-bit input-capture timer plus DMA ring** is the primary experiment. Check whether an appropriate timer channel truly supports both-edge capture, or whether opposite-polarity channels can be timestamped against one clock and merged without ordering ambiguity. Use the same clock domain, or a proven synchronized correlation, for gate-on/gate-off timestamps and RD phase.
+**[OPEN]** The exact capture channel and DMA routing must be verified in RM0383 and for the selected package. Do not assume a single capture channel always supports both polarities: two opposite-polarity channels may require an ordering/merge strategy. CPLD input qualification may help, but ordinary writes remain validated by STM32.
 
-**[REFERENCE]** Worst-case one transition per bit cell means **489,600 transitions/s** and about **1.96 MB/s** of 32-bit timestamps. A **4,096-entry timestamp ring lasts ~8.37 ms** at that rate, so DMA half-buffer handling and continuous decoding need measured bounded latency. Two 4,096-entry rings occupy **32 KiB**. A track format burst lasts roughly 120–171 ms; it cannot fit in a small finite edge buffer without continuous processing.
-
-Capture flow:
+**[REFERENCE]** At a worst-case one transition per GCR cell, captures approach **489,600 events/s** = **1,958,400 bytes/s** for 32-bit timestamps. A **4,096-entry (16-KiB)** ring provides two 8-KiB halves, each **~4.183 ms** of worst-case service time. A 100-MHz MCU must drain and parse this continuously during a full-track format; this has not yet been measured.
 
 ~~~text
-qualified /WRREQ falling edge -> latch cartridge/track/side/RD phase
-    -> capture both WR edges and classify GCR sync
-    -> one SYNC6 + D5 AA AD: ordinary sector candidate
-    -> >=50 consecutive SYNC6: whole-track format candidate
-    -> recover byte alignment; validate stored address/sector context
-    -> validate complete data header + 703 GCR bytes/checksums
-    -> update/rebuild coherent RAM track (not arbitrary bit splice)
-    -> queue background safe persistence
+qualify write gate → latch target media and track/phase
+  → DMA timestamps both WR edges
+  → recover SYNC6 and GCR codeword alignment
+  → ordinary sector update or >=50-SYNC6 format candidate
+  → validate complete original encoded fields, checksums, IDs
+  → publish coherent RAM generation for immediate readback
+  → background SPI NOR persistence and safe metadata commit
 ~~~
 
-**[DECISION]** Never assume gate edges align with codeword boundaries. Preserve original complete address headers on ordinary sector writes, and do not accept incomplete/invalid sectors. ROM format retry replaces the candidate track and must be readable immediately after capture, before flash commit. Real host gate timing and edge polarity require measurement.
+**[DECISION]** Preserve unaffected sector records and address headers. Reject incomplete writes without falsely accepting them; treat interrupted formatting as permitted damage only to the target track, per Section 14.
 
 ### 16.7 Shared virtual state and track publication
 
@@ -174,34 +171,36 @@ qualified /WRREQ falling edge -> latch cartridge/track/side/RD phase
 
 ### 16.8 LSTRB, STEP, READY and TACH
 
-**[DECISION]** Sample commands on **qualified LSTRB rising edges** with the source-defined selector setup and ≥1.0-µs high pulse. Do not infer a command from selecting a status. STEP advances exactly one logical track according to direction and exposes an observable **0.5–72-µs internal /STEP feedback** through RD status; the MCU need not simulate a moving carriage.
+**[PREFERRED]** The CPLD handles **qualified LSTRB rising edges**, fast Sony command feedback, and the **0.5–72-µs STEP low acknowledgment**. It notifies the STM32 of track, direction, motor and eject events through a registered interface, without decoding the Macintosh high-level disk format.
 
-**[DECISION]** READY is a genuine transfer-permission status: it can assert only when cartridge, motor command, selected track/side and output bitstream are coherent. A track change must not expose an older cached track. A selected 400K image on an 800K-capable drive does not magically contain recorded side-1 data.
+**[PREFERRED]** TACH generation is derived from the CPLD reference clock with five nominal target frequencies **394/429/472/525/590 Hz**. Its state must continue independently of the host momentarily selecting TACH; integer or fractional counters must be fitted and tested for period accuracy. GCR data-clock rate remains constant through all zones.
 
-**[DECISION]** Generate TACH with an **independent periodic timer** using 394/429/472/525/590-Hz reference outputs, **not** from five GCR data clocks. The ROM actually checks TACH during 800K reads. Selecting TACH must not restart its phase; the proposed ~50% duty cycle and stopped-idle level require physical comparison before approval.
+**[DECISION]** READY is a genuine handshake from STM32 to CPLD: only advertise ready with a qualified cartridge, correct track/side, valid DMA buffer and initial transmit byte, correct logical motor state and no conflicting write operation. No side-1 formatted sectors are invented for a 400K medium.
 
-**[DECISION]** /ENBL inactive requires fast RD high-Z and the correct motor-off latch effect. It does not authorize discarding an accepted dirty generation or aborting a safe flash transaction.
+**[OPEN]** Prove the CPLD's macrocell use, status register update handshake, TACH counter width, selected output timing and reset defaults. Do not assume all these functions automatically fit the 128-macrocell device.
 
 ### 16.9 RAM and DMA budget
 
-**[DECISION]** Provide **three complete independently allocated track buffers ≥12 KiB each (36 KiB)** plus separate time-critical capture and flash staging. Roles are dynamic: active read, incoming reconstruction, pending persistence; a dirty or currently emitted generation cannot be evicted.
+**[SOURCE]** The F411 contains **128 KiB SRAM**, and **does not have the F407's additional 64-KiB CCM bank**. Consequently the earlier 196-KiB H723 illustration and F407-specific CCM allocation are not applicable.
 
-**[CANDIDATE — illustrative starting allocation, not a frozen memory map]**
+**[PREFERRED]** Keep the agreed **three independent complete ≥12-KiB track buffers** (36 KiB total). Allocate SPI slave DMA output, WR timestamp ring and flash transfers in verified DMA-accessible SRAM. No buffer feeding DMA may be modified until its consumer has released it.
 
-| Consumer | Suggested amount |
+**[CANDIDATE]** Illustrative **128-KiB** budget:
+
+| Consumer | Initial allocation |
 |---|---:|
-| Three cyclic full-track buffers | 36 KiB |
-| Two × 4,096-entry × 32-bit WR timestamp rings | 32 KiB |
-| GCR record assembly / parser workspace | 16 KiB |
-| GCR serializer/event staging | 16 KiB |
-| SPI flash pages / read-modify-erase workspace | 16 KiB |
-| Compact directory, sector and cache indices | 16 KiB |
-| Stacks, diagnostics, task and spare space | 64 KiB |
-| **Illustrative aggregate** | **196 KiB** |
+| Three full cyclic track buffers | 36 KiB |
+| WR input capture: 4,096 × 32-bit timestamps | 16 KiB |
+| SPI slave TX: 2 × 1-KiB halves | 2 KiB |
+| SPI NOR transfer staging | 8 KiB |
+| Track rebuild and GCR record workspace | 8 KiB |
+| Track directory/cache metadata | 8 KiB |
+| Parser, firmware stacks and interrupts | 16 KiB |
+| Additional tasks, diagnostics and workspace | 8 KiB |
+| **Subtotal** | **102 KiB** |
+| **Unallocated margin** | **26 KiB** |
 
-**[SOURCE / CRITICAL]** A Cortex-M7 STM32H7's **TCM vs AXI/AHB SRAM domains and D-cache coherency** matter: *total 564 KiB RAM* is not necessarily accessible by all DMA controllers. Place DMA rings and serializer feeds in **DMA-reachable memory**, verify bus connectivity, and use cache maintenance or MPU-marked non-cacheable aligned regions; DTCM is often CPU-only for general-purpose DMA. ST's own DMA guidance notes such access/cache hazards. [ST H7 DMA-memory discussion](https://community.st.com/stm32-mcus-embedded-software-32/h743zi2-sdmmc-with-dma-mdma-28079).
-
-**[OPEN]** Exact linker sections, cache lines, DMA controller reachability, concurrent bus bandwidth and stack peaks must be demonstrated for the selected STM32 package.
+**[OPEN]** This is not yet a proven linker map; evaluate worst-case parser scratch, flash transaction buffers, simultaneous dirty track generations, DMA stream conflicts, stack/heap use, bus contention and startup RAM. The nominal **61,200-byte/s** read stream is light, but WR peak-rate decoding and asynchronous NOR operations must pass timing tests.
 
 ### 16.10 SPI-flash access and concurrent reads
 
@@ -253,50 +252,55 @@ A full ROM format may use a specially isolated destructive target policy, but ca
 
 **[DECISION]** On eject: block new writes, complete/make accepted writes recoverable, then signal genuine no-media. Unexpected removal: stop using unqualified SPI pins, suppress stale RD and invalidate the old generation. A pending write or fast cartridge change may require separate contact sensor/interlock/hold-up hardware; actual component selection is open.
 
-**[CANDIDATE]** Start the power budget with Macintosh **+5 V** into a suitable 3.3-V regulator; +12 V might remain unused but must stay a supply pin, never a GPIO. **Pin 9 −12 V and pin 20 PWM are unconnected.** Provide RD power-off high-Z, brownout/reset supervisor and no back-power through ESD diodes or cartridge contacts. Selection of regulator, protection, output buffer and hold-up energy is deferred until worst-case current/rom-eject window analysis.
+**[PREFERRED]** Power the 5-V CPLD core from a suitably protected Macintosh **+5-V supply**, and the 3.3-V F411 and cartridge through a regulated supply. Choose CPLD VCCIO and any necessary translators after confirming the exact suffix. +12 V may remain unused but must not become a GPIO. **Pin 9 −12 V and pin 20 PWM are unconnected.** Provide RD power-off high-Z, brownout/reset supervisor and no back-power through ESD diodes or cartridge contacts. Selection of regulator, protection, output buffer and hold-up energy is deferred until worst-case current/rom-eject window analysis.
 
-**[NEW TEST RESOURCE]** A Macintosh **M0001AP with an included external drive** has been acquired and is expected soon. It will be useful for actual IWM/RD/WR/TACH measurements and comparison. **Inspect and identify both drives first**; an external DB-19 mechanism/revision must not be assumed to have the same internal 20-pin signal mapping, and advertised working condition is **not yet a verified bench result**.
+**[TEST RESOURCE]** A Macintosh **M0001AP with an included external drive** has been acquired and is expected soon. It will be useful for actual IWM/RD/WR/TACH measurements and comparison. **Inspect and identify both drives first**; an external DB-19 mechanism/revision must not be assumed to have the same internal 20-pin signal mapping, and advertised working condition is **not yet a verified bench result**.
 
 ### 16.13 Firmware ownership and priorities
 
-**[CANDIDATE]** Begin with bare-metal/event-driven firmware or a minimal RTOS only when latency tests justify one. Critical host signal timings should be **peripheral/hardware driven**, not one CPU ISR per GCR pulse/WR edge.
+**[PREFERRED]** Keep the CPLD's electrical work independent of the MCU's storage or parser scheduling.
 
-| Priority | Owner | Cannot wait for |
+| Owner | Responsibility | Must not depend on |
 |---|---|---|
-| Fast hardware | RD high-Z /ENBL, selector-to-RD mux | CPU, interrupts, SPI |
-| Hard timer/DMA | GCR pulse timing, WR timestamp capture, free-running TACH | Flash erase, logs, decoding |
-| Short bounded event | LSTRB, STEP feedback, gate edges, track publish | Filesystem, directory walk |
-| Bounded software | Drain WR rings, GCR validation, track build | Busy flash on an already-ready RD path |
-| Background | SPI read/erase/program, COW/journal, prefetch, diagnostics | Serial timing and gate capture |
-| Offline PC | Logical image import and 6-and-2 conversion | STM32 real-time read |
+| ATF1508 | 19.584-MHz cell divider, SCK, short RD pulses, host status/RD mux, high-Z, LSTRB, STEP, TACH | CPU interrupts or flash |
+| F411 SPI-slave + DMA | Continuous, correctly wrapped encoded GCR bytes | Blocking software and flash |
+| F411 timer + DMA | Both-edge WR timestamps and gate timing | Flash programming |
+| F411 bounded CPU work | WR parser, sector checks, track buffer updates, READY publication | Unbounded NOR busy |
+| F411 background worker | SPI NOR reads, erase/program, journaling, power-loss recovery | Real-time pulse or capture path |
+| External PC programmer | Logical disk-image import, offline 6-and-2 conversion and tag policy | Live MCU playback |
 
-**Invariants:** single owner of the cartridge SPI command stream; DMA-visible buffers mapped/coherent; no mutation of active RD track; dirty generations pinned; every queued request tagged with cartridge identity; no false-ready stale track; no silently dropped write if all buffers are exhausted. Diagnostics must be buffered or disabled during timing-sensitive work.
+**[DECISION]** One worker owns the NOR bus. Every pending operation carries cartridge identity and generation. Pin active or dirty track generations; DMA may not read a buffer being modified by the parser. Keep logs asynchronous and do not invent extra Sony error or flow-control pins.
 
 ### 16.14 Development stages and acceptance gates
 
-**[DECISION — recommended sequence]**
+**[PREFERRED]** Incrementally prove feasibility before freezing the physical PCB:
 
-| Stage | Implementation/test | Exit evidence |
+| Stage | Experiment | Exit evidence |
 |---|---|---|
-| P0 — acquired Mac inspection | Verify M0001AP and external drive identity, connector orientation and safe rail measurements | Documented host harness/power; no risk to historic hardware |
-| P1 — RD selector interface | Fast selector, true high-Z enable, status latches, LSTRB and STEP | ≤0.5-µs mux/OE, correct host DC drive and timing |
-| P2 — GCR output | Test SPI+strobe and/or timer/DMA output with SYNC6 and full track | Correct pulse width, calibrated cell clock, cyclic wrap and no extra pulses |
-| P3 — WR capture | Both-edge DMA ring, gate timing, sector ID and 50-SYNC6 format recognition | No missed edges, complete sector/format capture and immediate RAM readback |
-| P4 — cache/flash concurrency | ≥3 track buffers; 2-MiB NOR; flash suspend/read collision | Valid ROM-like stream throughout flash work; no stale RD |
-| P5 — recovery | Repeated writes, mid-erase power cut, protect, surprise removal, dirty eject | Recoverable directory, no unrelated-sector corruption and defined limits |
-| P6 — real Plus verification | Boot, 400K/800K read/write/format/Verify, TACH recheck | Logic-analyzer trace and Macintosh-visible success |
-| P7 — hardware freeze | Select exact MCU, pinmux, buffers, power and cartridge circuit | Reviewed schematic/BOM/pin map for KiCad |
+| P0 | Identify exact F411 and ATF1508 suffixes/packages; safely inspect purchased Macintosh | Real pinout, device datasheets and viable programming tools |
+| P1 | 19.584-MHz CPLD oscillator, ÷40, 10-tick RD pulse | Correct 489,600-Hz cells, 0.510621-µs pulse and stable timing |
+| P2 | F411 SPI-slave TX circular DMA with CPLD SCK/NSS | No repeated/missed bits at DMA half/full boundaries or track seam |
+| P3 | CPLD PH/SEL status mux, /ENBL tri-state, LSTRB/STEP and TACH | Required ≤0.5-µs RD response, command pulse/period conformity |
+| P4 | F411 TIM2/TIM5 both-edge WR DMA while SPI TX runs | Full sector/format capture without overflow or pulse interference |
+| P5 | Three full-track buffers and independent 2-MiB NOR | Host read timing survives concurrent cache/flash operations |
+| P6 | Faults, repeated writes, write protection, cartridge removal and power cuts | No unrelated-track corruption; recoverable confirmed generations |
+| P7 | Actual Macintosh Plus ROM reads/writes/formats/boots 400K and 800K | Measured and Macintosh-visible functional pass |
+| P8 | Freeze pinmux, CPLD logic fit, power/voltage buffers and KiCad schematic | Evidence-backed electrical BOM and tested design |
 
-**[OPEN]** Section 17 owns complete automated test vectors, MCU stress benchmarks, actual clock/jitter tolerance, flash recovery fault injections and realistic host timing acceptance. A headline 550-MHz CPU rating is never a substitute for the P1/P2/P3 timing gates.
+**[OPEN]** The external drive supplied with the Macintosh is a reference for further measurement but is not assumed to use the internal 20-pin MFD-51W wiring.
 
 ### 16.15 Approved boundaries and pending choices
 
-**Settled constraints retained:** original Macintosh IWM/ROM; internal MFD-51W 20-pin, **pins 9/20 left disconnected**; standard 400K/800K only; structured 32+703-byte sector records; exact reconstructed logical track; nominal single global GCR cell clock; independent five-profile TACH; **≥3 ×12 KiB** complete-track RAM buffers; independent SPI NOR persistence and genuine Sony electrical timing.
+**Preferred development architecture [PREFERRED]:** 5-V ATF1508-family CPLD + **STM32F411** (full suffix/package pending) with **19.584-MHz precision oscillator**, **CPLD ÷40 serial clock = 489,600 Hz**, **10-tick = 0.510621-µs RD pulses**, F411 **SPI-slave circular DMA**, a separate SPI-NOR bus and timer/DMA **both-edge WR capture**. This supersedes H723-first and F407-first MCU candidate preference without approving a specific BOM.
 
-**To evaluate, not yet approve:** **STM32H723ZG**, fast 5-V-safe RD selector/buffer, hardware shifter+strobe vs compare/DMA pulse engine, both-edge input capture+DMA, exact 196-KiB illustrative SRAM placement, SST26VF016B suspend/resume, COW+journal flash transaction, 5-V-to-3.3-V power and safe cartridge contacts.
+**Settled existing media requirements remain unchanged:** standard 400K/800K only, structured **32+703-byte GCR sector records**, logical sector-0 circular buffer with independent RD phase, five TACH zones, **≥3 × 12-KiB RAM track buffers**, 2-MiB removable NOR, correct pins 9/20 isolation, genuine Macintosh ROM read/write/format and safe media errors.
 
-**Critical open gates:** exact MCU pinmux and DMA memory reachability; pulse/gate jitter with concurrent SPI; real host selector/read handoff; flash-busy cache misses; bounded buffer exhaustion; truly recoverable media metadata; safe ejection/power-loss energy and external-drive model identification.
+**Open gates:** verify CPLD suffix/VCCIO and fitter resources, F411 package/pinmux/DMA; continuous first-byte-preloaded SPI-slave transmission and nonbyte-aligned cyclic wrap; power-on RD tri-state; WR capture CPU headroom at 100 MHz; real NOR flash-busy cache-miss, journal durability, safe eject and power integrity.
+
+**Hardware precision alone does not automatically guarantee a lossless SPI-slave byte stream or safe handling of all media faults.**
 
 **Document history**
+
+- **2026-11-17:** Revised the preferred architecture to a 5-V ATF1508 + STM32F411, CPLD-controlled SPI-slave GCR at 489,600 Hz, 10-tick RD pulse shaping and 128-KiB MCU SRAM budget; superseded H723/F407-first preference without freezing component packages or PCB.
 
 - **2026-11-12:** Created Part 8 / Section 16, translating Sections 10–15 into a candidate STM32 implementation and timed proof plan. Incorporated the newly acquired Macintosh/external drive as a prospective measurement reference without assuming its condition or pinout. No MCU part number, circuit or flash transaction algorithm approved yet.
